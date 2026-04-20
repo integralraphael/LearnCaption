@@ -82,8 +82,10 @@ IPC event → React subtitle render
 - Each word rendered as an inline flex unit: English word on top, Chinese definition directly below (same column)
 - Only annotated words show Chinese text; unannotated words reserve the same line height (no layout shift)
 
-**Word annotation logic:**
-- Show definition for words that are: (a) in the user's vocab book, OR (b) estimated above the user's vocabulary level
+**Annotation logic:**
+- Entries can be single words or multi-word phrases/idioms
+- Show definition for entries that are: (a) in the user's vocab book, OR (b) estimated above the user's vocabulary level
+- Phrase entries take priority over contained word entries (longest-match-wins — see Data Model)
 - Do not annotate common/known words
 
 **Vocabulary level estimation:**
@@ -121,27 +123,39 @@ IPC event → React subtitle render
 | timestamp_ms | INTEGER | Offset from meeting start |
 | speaker_label | TEXT | Null in MVP; reserved for diarization |
 
-### `words`
+### `vocabulary`
+Renamed from `words` — entries can be single words, phrases, or idioms.
+
 | Column | Type | Notes |
 |--------|------|-------|
 | id | INTEGER PK | |
-| word | TEXT UNIQUE | Unique constraint, used for lookups |
-| definition | TEXT | From ECDICT |
+| entry | TEXT UNIQUE | The word or phrase, e.g. `"leverage"` or `"look forward to"` |
+| type | TEXT | `'word'` \| `'phrase'` \| `'idiom'` |
+| definition | TEXT | From ECDICT, or user-entered for phrases |
 | familiarity | INTEGER | 0 = unknown → 5 = mastered |
 | occurrence_count | INTEGER | Total across all meetings |
 | added_at | DATETIME | |
 | mastered_at | DATETIME | Set when familiarity reaches 5 |
 
-### `word_sentences`
+### `vocab_sentences`
 | Column | Type | Notes |
 |--------|------|-------|
 | id | INTEGER PK | |
-| word_id | INTEGER FK | → words.id |
+| vocab_id | INTEGER FK | → vocabulary.id |
 | line_id | INTEGER FK | → transcript_lines.id |
 | meeting_id | INTEGER FK | → meetings.id (for fast filtering) |
 | created_at | DATETIME | |
 
-**Index:** `word_sentences(word_id)` — ensures sub-millisecond lookup of all sentences for a word.
+**Index:** `vocab_sentences(vocab_id)` — ensures sub-millisecond lookup of all sentences for an entry.
+
+### Phrase vs Word matching priority
+
+When annotating a subtitle line, matching uses **Aho-Corasick multi-pattern search** with **longest-match-wins** semantics:
+
+- All `vocabulary` entries (words and phrases) are loaded into the Aho-Corasick automaton at startup
+- When a phrase match (e.g. `"look forward to"`) overlaps with a word match (e.g. `"forward"`), the phrase wins and the word is suppressed
+- Each token position can only belong to one annotation — no nested or overlapping highlights
+- This ensures the user sees the most meaningful annotation, not redundant sub-matches
 
 ---
 
