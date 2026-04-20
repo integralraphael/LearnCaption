@@ -1,6 +1,7 @@
 mod commands;
 mod db;
 mod dictionary;
+mod pipeline;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
