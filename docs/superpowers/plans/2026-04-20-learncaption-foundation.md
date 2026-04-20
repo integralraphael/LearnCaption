@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build the Tauri app skeleton, SQLite schema, ECDICT dictionary, Aho-Corasick annotation engine, ScreenCaptureKit audio sidecar, faster-whisper STT sidecar, and wire them into a working pipeline that emits annotated subtitle IPC events.
+**Goal:** Build the Tauri app skeleton, SQLite schema, ECDICT dictionary, Aho-Corasick annotation engine, ScreenCaptureKit audio sidecar, whisper-rs STT, first-launch model download, and wire them into a working pipeline that emits annotated subtitle IPC events.
 
-**Architecture:** Rust backend orchestrates two sidecars (Swift audio capture, Python STT). Whisper output flows through the annotation engine (ECDICT HashMap + Aho-Corasick vocabulary matcher) and is pushed to the React frontend via Tauri IPC events.
+**Architecture:** Rust backend runs whisper-rs (whisper.cpp via FFI) directly — no Python sidecar. One Swift sidecar handles audio capture (ScreenCaptureKit). PCM chunks flow from the sidecar into the Rust STT engine, through the annotation engine, and out to React via Tauri IPC events. App bundle is ~40MB; the whisper model (~500MB) downloads on first launch.
 
-**Tech Stack:** Tauri 2, Rust, React + TypeScript, SQLite (tauri-plugin-sql), aho-corasick crate, rusqlite, Swift (ScreenCaptureKit), Python 3.11 + faster-whisper + silero-vad, ECDICT
+**Tech Stack:** Tauri 2, Rust, React + TypeScript, SQLite (tauri-plugin-sql), aho-corasick crate, rusqlite, whisper-rs crate, Swift (ScreenCaptureKit), ECDICT
 
 ---
 
@@ -24,21 +24,19 @@ learncaption/
 │   │   ├── pipeline/
 │   │   │   ├── mod.rs
 │   │   │   ├── audio_sidecar.rs     # spawn + manage Swift audio sidecar
-│   │   │   ├── stt_sidecar.rs       # spawn + manage Python STT sidecar
+│   │   │   ├── stt.rs               # whisper-rs engine — runs in Rust, no sidecar
+│   │   │   ├── model_download.rs    # first-launch model download + progress events
 │   │   │   └── annotator.rs         # ECDICT lookup + Aho-Corasick matcher → AnnotatedLine
 │   │   ├── dictionary/
 │   │   │   └── ecdict.rs            # load ECDICT SQLite → HashMap<String,String>
 │   │   └── db/
 │   │       └── schema.rs            # run migrations, expose DbPool type alias
 │   ├── sidecars/
-│   │   ├── audio-capture/           # Swift Package — ScreenCaptureKit audio tap
-│   │   │   ├── Package.swift
-│   │   │   └── Sources/AudioCapture/main.swift
-│   │   └── stt/                     # Python — faster-whisper + silero-vad
-│   │       ├── requirements.txt
-│   │       └── stt.py
+│   │   └── audio-capture/           # Swift Package — ScreenCaptureKit audio tap
+│   │       ├── Package.swift
+│   │       └── Sources/AudioCapture/main.swift
 │   ├── resources/
-│   │   └── ecdict.db                # ECDICT SQLite (downloaded in Task 3)
+│   │   └── ecdict.db                # ECDICT SQLite filtered to 100k entries (~25MB)
 │   ├── Cargo.toml
 │   └── tauri.conf.json
 └── src/                             # React frontend (scaffolded in Task 1)
@@ -952,170 +950,256 @@ git commit -m "feat: ScreenCaptureKit audio sidecar — 16kHz PCM chunks to stdo
 
 ---
 
-## Task 6: faster-whisper STT Sidecar (Python)
+## Task 6: whisper-rs STT Engine + First-Launch Model Download
 
 **Files:**
-- Create: `src-tauri/sidecars/stt/requirements.txt`
-- Create: `src-tauri/sidecars/stt/stt.py`
+- Create: `src-tauri/src/pipeline/stt.rs`
+- Create: `src-tauri/src/pipeline/model_download.rs`
+- Modify: `src-tauri/Cargo.toml`
+- Modify: `src-tauri/src/pipeline/mod.rs`
 
-This sidecar:
-1. Reads raw PCM float32 chunks from stdin (length-prefixed, same format as audio sidecar)
-2. Accumulates audio; uses silero-VAD to detect end-of-utterance
-3. Runs faster-whisper inference on complete utterances
-4. Writes JSON lines to stdout: `{"text": "...", "timestamp_ms": 12345}`
+No Python sidecar. whisper-rs links whisper.cpp as a static Rust library. The whisper `small` model (~500MB) is downloaded to `~/Library/Application Support/LearnCaption/models/` on first launch.
 
-- [ ] **Step 1: Create `src-tauri/sidecars/stt/requirements.txt`**
+- [ ] **Step 1: Add whisper-rs to `src-tauri/Cargo.toml`**
 
-```
-faster-whisper==1.0.3
-silero-vad==5.1
-torch==2.2.2
-torchaudio==2.2.2
-numpy==1.26.4
+```toml
+[dependencies]
+whisper-rs = { version = "0.11", features = ["metal"] }
+reqwest = { version = "0.12", features = ["stream"] }
+futures-util = "0.3"
 ```
 
-- [ ] **Step 2: Create `src-tauri/sidecars/stt/stt.py`**
+The `metal` feature enables Apple Silicon GPU acceleration via whisper.cpp's Core ML backend.
 
-```python
-#!/usr/bin/env python3
-"""
-STT sidecar: reads 16kHz mono float32 PCM chunks from stdin,
-runs faster-whisper with silero-VAD, writes JSON lines to stdout.
+- [ ] **Step 2: Create `src-tauri/src/pipeline/model_download.rs`**
 
-Input format: 4-byte uint32 LE length + float32 samples (matching audio sidecar)
-Output format: {"text": "...", "timestamp_ms": 1234}\n
-"""
-import sys
-import json
-import struct
-import time
-import numpy as np
-from faster_whisper import WhisperModel
-from silero_vad import load_silero_vad, get_speech_timestamps
+```rust
+use std::path::PathBuf;
+use tauri::{AppHandle, Emitter};
+use futures_util::StreamExt;
 
-SAMPLE_RATE = 16000
-MIN_SILENCE_MS = 400   # silence duration to trigger inference
-MAX_BUFFER_S = 10      # force inference after 10s even without silence
-MIN_SPEECH_S = 0.3     # ignore very short utterances
+const MODEL_URL: &str =
+    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin";
+const MODEL_FILENAME: &str = "ggml-small.en.bin";
 
-model = WhisperModel("small", device="cpu", compute_type="int8")
-vad_model = load_silero_vad()
+/// Returns the path where the model should live.
+pub fn model_path(app: &AppHandle) -> PathBuf {
+    app.path()
+        .app_data_dir()
+        .expect("no app data dir")
+        .join("models")
+        .join(MODEL_FILENAME)
+}
 
-audio_buffer = np.array([], dtype=np.float32)
-session_start_ms = int(time.time() * 1000)
+/// Returns true if the model file already exists and is non-empty.
+pub fn model_exists(app: &AppHandle) -> bool {
+    let p = model_path(app);
+    p.exists() && p.metadata().map(|m| m.len() > 0).unwrap_or(false)
+}
 
+/// Download the model, emitting `model-download-progress` events (0.0–1.0).
+/// Emits `model-download-done` on success, `model-download-error` on failure.
+pub async fn download_model(app: AppHandle) {
+    let dest = model_path(&app);
+    std::fs::create_dir_all(dest.parent().unwrap()).ok();
 
-def read_chunk() -> np.ndarray | None:
-    """Read one length-prefixed PCM chunk from stdin."""
-    header = sys.stdin.buffer.read(4)
-    if len(header) < 4:
-        return None
-    byte_count = struct.unpack("<I", header)[0]
-    raw = sys.stdin.buffer.read(byte_count)
-    if len(raw) < byte_count:
-        return None
-    return np.frombuffer(raw, dtype=np.float32)
+    let client = reqwest::Client::new();
+    let response = match client.get(MODEL_URL).send().await {
+        Ok(r) => r,
+        Err(e) => {
+            let _ = app.emit("model-download-error", e.to_string());
+            return;
+        }
+    };
 
+    let total = response.content_length().unwrap_or(0);
+    let mut downloaded: u64 = 0;
+    let mut stream = response.bytes_stream();
 
-def run_inference(audio: np.ndarray, offset_ms: int):
-    """Run whisper on audio, emit JSON lines to stdout."""
-    segments, _ = model.transcribe(
-        audio,
-        language="en",
-        beam_size=5,
-        vad_filter=False,  # we handle VAD ourselves
-    )
-    for seg in segments:
-        text = seg.text.strip()
-        if not text:
-            continue
-        ts = offset_ms + int(seg.start * 1000)
-        line = json.dumps({"text": text, "timestamp_ms": ts})
-        sys.stdout.write(line + "\n")
-        sys.stdout.flush()
+    let mut file = match std::fs::File::create(&dest) {
+        Ok(f) => f,
+        Err(e) => {
+            let _ = app.emit("model-download-error", e.to_string());
+            return;
+        }
+    };
 
-
-def has_trailing_silence(audio: np.ndarray) -> bool:
-    """Return True if the last MIN_SILENCE_MS of audio contains no speech."""
-    silence_samples = int(SAMPLE_RATE * MIN_SILENCE_MS / 1000)
-    if len(audio) < silence_samples:
-        return False
-    tail = audio[-silence_samples:]
-    timestamps = get_speech_timestamps(tail, vad_model, sampling_rate=SAMPLE_RATE)
-    return len(timestamps) == 0
-
-
-def main():
-    global audio_buffer
-    chunk_start_ms = int(time.time() * 1000) - session_start_ms
-
-    while True:
-        chunk = read_chunk()
-        if chunk is None:
-            break
-        audio_buffer = np.concatenate([audio_buffer, chunk])
-
-        duration_s = len(audio_buffer) / SAMPLE_RATE
-        should_infer = (
-            (duration_s >= MIN_SPEECH_S and has_trailing_silence(audio_buffer))
-            or duration_s >= MAX_BUFFER_S
-        )
-
-        if should_infer:
-            run_inference(audio_buffer, chunk_start_ms)
-            chunk_start_ms = int(time.time() * 1000) - session_start_ms
-            audio_buffer = np.array([], dtype=np.float32)
-
-
-if __name__ == "__main__":
-    main()
-```
-
-- [ ] **Step 3: Test the STT sidecar in isolation**
-
-```bash
-cd src-tauri/sidecars/stt
-pip install -r requirements.txt
-# Generate 3 seconds of silence as a test (should produce no output)
-python3 -c "
-import struct, numpy as np, sys
-samples = np.zeros(16000*3, dtype=np.float32)
-chunk = 1600
-for i in range(0, len(samples), chunk):
-    s = samples[i:i+chunk]
-    sys.stdout.buffer.write(struct.pack('<I', len(s)*4))
-    sys.stdout.buffer.write(s.tobytes())
-" | python3 stt.py
-```
-
-Expected: no output (silence produces no transcript lines).
-
-- [ ] **Step 4: Freeze sidecar to binary with PyInstaller**
-
-```bash
-pip install pyinstaller
-pyinstaller --onefile --name stt stt.py
-cp dist/stt ../../binaries/stt-aarch64-apple-darwin
-```
-
-- [ ] **Step 5: Register in `tauri.conf.json`**
-
-```json
-{
-  "bundle": {
-    "externalBin": [
-      "binaries/audio-capture",
-      "binaries/stt"
-    ]
-  }
+    use std::io::Write;
+    while let Some(chunk) = stream.next().await {
+        match chunk {
+            Ok(bytes) => {
+                if file.write_all(&bytes).is_err() {
+                    let _ = app.emit("model-download-error", "write failed");
+                    return;
+                }
+                downloaded += bytes.len() as u64;
+                if total > 0 {
+                    let progress = downloaded as f32 / total as f32;
+                    let _ = app.emit("model-download-progress", progress);
+                }
+            }
+            Err(e) => {
+                let _ = app.emit("model-download-error", e.to_string());
+                return;
+            }
+        }
+    }
+    let _ = app.emit("model-download-done", ());
 }
 ```
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 3: Write tests for model_download helpers**
+
+Add to bottom of `model_download.rs`:
+
+```rust
+#[cfg(test)]
+mod tests {
+    // model_exists and model_path are tested via integration in Task 7.
+    // Unit-testable: verify MODEL_URL points to a .bin file.
+    #[test]
+    fn test_model_url_ends_with_bin() {
+        assert!(super::MODEL_URL.ends_with(".bin"));
+    }
+
+    #[test]
+    fn test_model_filename_matches_url() {
+        assert!(super::MODEL_URL.contains(super::MODEL_FILENAME));
+    }
+}
+```
+
+- [ ] **Step 4: Run tests**
 
 ```bash
-git add src-tauri/sidecars/stt src-tauri/binaries/stt-aarch64-apple-darwin src-tauri/tauri.conf.json
-git commit -m "feat: faster-whisper STT sidecar with silero-VAD, JSON output"
+cd src-tauri && cargo test pipeline::model_download
+```
+
+Expected: 2 tests pass.
+
+- [ ] **Step 5: Create `src-tauri/src/pipeline/stt.rs`**
+
+```rust
+use std::path::Path;
+use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
+
+pub struct SttEngine {
+    ctx: WhisperContext,
+}
+
+impl SttEngine {
+    /// Load the model from disk. Call only after model_exists() is true.
+    pub fn load(model_path: &Path) -> Result<Self, String> {
+        let ctx = WhisperContext::new_with_params(
+            model_path.to_str().unwrap(),
+            WhisperContextParameters::default(),
+        )
+        .map_err(|e| format!("failed to load whisper model: {e}"))?;
+        Ok(Self { ctx })
+    }
+
+    /// Transcribe a buffer of 16kHz mono f32 PCM samples.
+    /// Returns vec of (text, start_ms) pairs.
+    pub fn transcribe(&self, samples: &[f32]) -> Result<Vec<(String, i64)>, String> {
+        let mut state = self.ctx.create_state().map_err(|e| e.to_string())?;
+
+        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+        params.set_language(Some("en"));
+        params.set_no_speech_thold(0.6); // skip segments with high silence probability
+        params.set_print_special(false);
+        params.set_print_progress(false);
+        params.set_print_realtime(false);
+        params.set_print_timestamps(false);
+
+        state
+            .full(params, samples)
+            .map_err(|e| format!("whisper inference failed: {e}"))?;
+
+        let n = state.full_n_segments().map_err(|e| e.to_string())?;
+        let mut results = Vec::new();
+        for i in 0..n {
+            let text = state.full_get_segment_text(i).map_err(|e| e.to_string())?;
+            let text = text.trim().to_string();
+            if text.is_empty() {
+                continue;
+            }
+            let t0 = state.full_get_segment_t0(i).map_err(|e| e.to_string())?;
+            let start_ms = t0 * 10; // whisper timestamps are in 10ms units
+            results.push((text, start_ms));
+        }
+        Ok(results)
+    }
+}
+
+/// Simple RMS energy gate — returns true if the buffer contains audible speech.
+/// Avoids running whisper on pure silence.
+pub fn has_speech(samples: &[f32], threshold: f32) -> bool {
+    if samples.is_empty() {
+        return false;
+    }
+    let rms = (samples.iter().map(|s| s * s).sum::<f32>() / samples.len() as f32).sqrt();
+    rms > threshold
+}
+```
+
+- [ ] **Step 6: Write tests for the STT engine**
+
+Add to bottom of `stt.rs`:
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_has_speech_silence() {
+        let silence = vec![0.0f32; 16000];
+        assert!(!has_speech(&silence, 0.01));
+    }
+
+    #[test]
+    fn test_has_speech_loud_audio() {
+        // 440Hz sine wave — clearly audible
+        let samples: Vec<f32> = (0..16000)
+            .map(|i| (2.0 * std::f32::consts::PI * 440.0 * i as f32 / 16000.0).sin() * 0.5)
+            .collect();
+        assert!(has_speech(&samples, 0.01));
+    }
+
+    #[test]
+    fn test_has_speech_empty() {
+        assert!(!has_speech(&[], 0.01));
+    }
+}
+```
+
+- [ ] **Step 7: Run tests**
+
+```bash
+cd src-tauri && cargo test pipeline::stt
+```
+
+Expected: 3 tests pass (no model needed for these unit tests).
+
+- [ ] **Step 8: Update `src-tauri/src/pipeline/mod.rs`**
+
+```rust
+pub mod annotator;
+pub mod audio_sidecar;
+pub mod model_download;
+pub mod stt;
+
+pub use annotator::{AnnotatedLine, Annotator, VocabEntry, WordToken};
+pub use audio_sidecar::AudioSidecar;
+pub use model_download::{download_model, model_exists, model_path};
+pub use stt::{has_speech, SttEngine};
+```
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add src-tauri/src/pipeline/stt.rs src-tauri/src/pipeline/model_download.rs src-tauri/src/pipeline/mod.rs src-tauri/Cargo.toml
+git commit -m "feat: whisper-rs STT engine + first-launch model download with progress events"
 ```
 
 ---
@@ -1123,120 +1207,37 @@ git commit -m "feat: faster-whisper STT sidecar with silero-VAD, JSON output"
 ## Task 7: Pipeline Orchestration (Rust)
 
 **Files:**
-- Create: `src-tauri/src/pipeline/audio_sidecar.rs`
-- Create: `src-tauri/src/pipeline/stt_sidecar.rs`
-- Modify: `src-tauri/src/pipeline/mod.rs`
 - Modify: `src-tauri/src/commands/pipeline.rs`
 - Modify: `src-tauri/src/main.rs`
 
-This task wires everything: spawn sidecars, pipe audio → STT, annotate output, emit IPC events.
+Wire everything: spawn audio sidecar, feed PCM into whisper-rs (running in a Rust thread), annotate output, emit IPC events. Also add the `check_model` command so the frontend can show the download screen on first launch.
 
-- [ ] **Step 1: Create `src-tauri/src/pipeline/audio_sidecar.rs`**
-
-```rust
-use std::process::{Child, Command, Stdio};
-use tauri::path::BaseDirectory;
-use tauri::Manager;
-
-pub struct AudioSidecar {
-    child: Child,
-}
-
-impl AudioSidecar {
-    pub fn spawn(app: &tauri::AppHandle) -> std::io::Result<Self> {
-        let binary = app
-            .path()
-            .resolve("binaries/audio-capture", BaseDirectory::Resource)
-            .expect("audio-capture binary not found");
-        let child = Command::new(binary)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .spawn()?;
-        Ok(Self { child })
-    }
-
-    /// Take stdout handle (call once; panics on second call)
-    pub fn take_stdout(&mut self) -> std::process::ChildStdout {
-        self.child.stdout.take().expect("stdout already taken")
-    }
-}
-
-impl Drop for AudioSidecar {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-    }
-}
-```
-
-- [ ] **Step 2: Create `src-tauri/src/pipeline/stt_sidecar.rs`**
+- [ ] **Step 1: Implement commands in `src-tauri/src/commands/pipeline.rs`**
 
 ```rust
-use std::io::{BufRead, BufReader, Write};
-use std::process::{Child, Command, Stdio};
-use tauri::path::BaseDirectory;
-use tauri::Manager;
-
-pub struct SttSidecar {
-    child: Child,
-}
-
-impl SttSidecar {
-    pub fn spawn(app: &tauri::AppHandle) -> std::io::Result<Self> {
-        let binary = app
-            .path()
-            .resolve("binaries/stt", BaseDirectory::Resource)
-            .expect("stt binary not found");
-        let child = Command::new(binary)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .spawn()?;
-        Ok(Self { child })
-    }
-
-    pub fn take_stdin(&mut self) -> std::process::ChildStdin {
-        self.child.stdin.take().expect("stdin already taken")
-    }
-
-    pub fn take_stdout(&mut self) -> std::process::ChildStdout {
-        self.child.stdout.take().expect("stdout already taken")
-    }
-}
-
-impl Drop for SttSidecar {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-    }
-}
-```
-
-- [ ] **Step 3: Update `src-tauri/src/pipeline/mod.rs`**
-
-```rust
-pub mod annotator;
-pub mod audio_sidecar;
-pub mod stt_sidecar;
-
-pub use annotator::{AnnotatedLine, Annotator, VocabEntry, WordToken};
-pub use audio_sidecar::AudioSidecar;
-pub use stt_sidecar::SttSidecar;
-```
-
-- [ ] **Step 4: Implement `start_recording` command in `src-tauri/src/commands/pipeline.rs`**
-
-```rust
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::Read;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::dictionary::EcdictDictionary;
-use crate::pipeline::{AnnotatedLine, Annotator, AudioSidecar, SttSidecar, VocabEntry};
+use crate::pipeline::{
+    download_model, has_speech, model_exists, model_path, Annotator, AudioSidecar, SttEngine,
+    VocabEntry,
+};
 
-pub struct PipelineState(pub Arc<Mutex<Option<PipelineHandles>>>);
+pub struct PipelineState(pub Arc<Mutex<Option<AudioSidecar>>>);
 
-pub struct PipelineHandles {
-    pub audio: AudioSidecar,
-    pub stt: SttSidecar,
+/// Called on app start — returns true if model is already downloaded.
+#[tauri::command]
+pub fn check_model(app: AppHandle) -> bool {
+    model_exists(&app)
+}
+
+/// Trigger model download. Progress events: `model-download-progress` (f32 0–1),
+/// `model-download-done`, `model-download-error` (String).
+#[tauri::command]
+pub async fn start_model_download(app: AppHandle) {
+    download_model(app).await;
 }
 
 #[tauri::command]
@@ -1244,78 +1245,96 @@ pub async fn start_recording(
     app: AppHandle,
     state: State<'_, PipelineState>,
 ) -> Result<(), String> {
+    if !model_exists(&app) {
+        return Err("model not downloaded yet".to_string());
+    }
+
+    let model_p = model_path(&app);
     let ecdict_path = app
         .path()
         .resolve("resources/ecdict.db", tauri::path::BaseDirectory::Resource)
         .map_err(|e| e.to_string())?;
 
-    let dict = EcdictDictionary::load(
-        ecdict_path.to_str().unwrap(),
-        100_000,
-    )
-    .map_err(|e| e.to_string())?;
-
+    let dict = EcdictDictionary::load(ecdict_path.to_str().unwrap(), 100_000)
+        .map_err(|e| e.to_string())?;
     let mut annotator = Annotator::new(dict);
-    // Load vocab entries from DB — stub: empty for now (Task fills in after DB integration)
-    annotator.rebuild_automaton(vec![]);
+    annotator.rebuild_automaton(vec![]); // wired to DB in Plan B
 
     let mut audio = AudioSidecar::spawn(&app).map_err(|e| e.to_string())?;
-    let mut stt = SttSidecar::spawn(&app).map_err(|e| e.to_string())?;
-
     let audio_stdout = audio.take_stdout();
-    let mut stt_stdin = stt.take_stdin();
-    let stt_stdout = stt.take_stdout();
 
-    // Thread 1: pipe audio sidecar stdout → stt sidecar stdin
+    let app2 = app.clone();
+    let annotator = Arc::new(Mutex::new(annotator));
+
     std::thread::spawn(move || {
-        let mut buf = [0u8; 4096];
+        // Load STT engine on the worker thread (blocks ~1s on first load)
+        let engine = match SttEngine::load(&model_p) {
+            Ok(e) => e,
+            Err(err) => {
+                let _ = app2.emit("pipeline-error", err);
+                return;
+            }
+        };
+
+        const SAMPLE_RATE: usize = 16000;
+        const CHUNK_BYTES: usize = 1600 * 4; // 100ms of float32
+        const MAX_BUFFER_S: usize = 8;
+        const SILENCE_CHUNKS: usize = 4; // 400ms of silence → trigger inference
+
+        let mut pcm_buffer: Vec<f32> = Vec::new();
+        let mut silent_chunks: usize = 0;
+        let mut session_start_ms: i64 = 0;
+        let mut buf = [0u8; 4 + CHUNK_BYTES];
         let mut reader = std::io::BufReader::new(audio_stdout);
+
         loop {
-            match reader.read(&mut buf) {
-                Ok(0) | Err(_) => break,
-                Ok(n) => {
-                    if stt_stdin.write_all(&buf[..n]).is_err() {
-                        break;
+            // Read length-prefixed chunk from audio sidecar
+            if reader.read_exact(&mut buf[..4]).is_err() { break; }
+            let len = u32::from_le_bytes(buf[..4].try_into().unwrap()) as usize;
+            if reader.read_exact(&mut buf[4..4 + len]).is_err() { break; }
+
+            let samples: Vec<f32> = buf[4..4 + len]
+                .chunks_exact(4)
+                .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
+                .collect();
+
+            let is_speech = has_speech(&samples, 0.01);
+            pcm_buffer.extend_from_slice(&samples);
+            silent_chunks = if is_speech { 0 } else { silent_chunks + 1 };
+
+            let duration_s = pcm_buffer.len() / SAMPLE_RATE;
+            let should_infer =
+                (silent_chunks >= SILENCE_CHUNKS && duration_s > 0)
+                || duration_s >= MAX_BUFFER_S;
+
+            if should_infer && !pcm_buffer.is_empty() {
+                if let Ok(segments) = engine.transcribe(&pcm_buffer) {
+                    let ann = annotator.lock().unwrap();
+                    for (text, offset_ms) in segments {
+                        let ts = session_start_ms + offset_ms;
+                        let line = ann.annotate(&text, 0, 0, ts);
+                        let _ = app2.emit("subtitle-line", &line);
                     }
                 }
+                session_start_ms += (pcm_buffer.len() / SAMPLE_RATE * 1000) as i64;
+                pcm_buffer.clear();
+                silent_chunks = 0;
             }
         }
     });
 
-    // Thread 2: read STT output, annotate, emit IPC events
-    let app2 = app.clone();
-    let annotator = Arc::new(Mutex::new(annotator));
-    std::thread::spawn(move || {
-        let reader = BufReader::new(stt_stdout);
-        for line in reader.lines() {
-            let Ok(line) = line else { break };
-            let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&line) else {
-                continue;
-            };
-            let text = parsed["text"].as_str().unwrap_or("").to_string();
-            let ts = parsed["timestamp_ms"].as_i64().unwrap_or(0);
-
-            let annotated = {
-                let ann = annotator.lock().unwrap();
-                ann.annotate(&text, 0, 0, ts) // line_id/meeting_id filled after DB in Plan B
-            };
-
-            let _ = app2.emit("subtitle-line", &annotated);
-        }
-    });
-
-    *state.0.lock().unwrap() = Some(PipelineHandles { audio, stt });
+    *state.0.lock().unwrap() = Some(audio);
     Ok(())
 }
 
 #[tauri::command]
 pub async fn stop_recording(state: State<'_, PipelineState>) -> Result<(), String> {
-    *state.0.lock().unwrap() = None; // Drop handles → kills sidecar processes
+    *state.0.lock().unwrap() = None; // Drop AudioSidecar → kills Swift process
     Ok(())
 }
 ```
 
-- [ ] **Step 5: Register state and updated commands in `src-tauri/src/main.rs`**
+- [ ] **Step 2: Update `src-tauri/src/main.rs`**
 
 ```rust
 mod commands;
@@ -1331,6 +1350,8 @@ fn main() {
         .plugin(tauri_plugin_sql::Builder::default().build())
         .manage(PipelineState(Arc::new(Mutex::new(None))))
         .invoke_handler(tauri::generate_handler![
+            commands::pipeline::check_model,
+            commands::pipeline::start_model_download,
             commands::pipeline::start_recording,
             commands::pipeline::stop_recording,
             commands::vocabulary::add_entry,
@@ -1341,7 +1362,7 @@ fn main() {
 }
 ```
 
-- [ ] **Step 6: Build and verify compilation**
+- [ ] **Step 3: Build and verify compilation**
 
 ```bash
 npm run tauri build -- --debug 2>&1 | tail -20
@@ -1349,21 +1370,31 @@ npm run tauri build -- --debug 2>&1 | tail -20
 
 Expected: compiles without errors.
 
-- [ ] **Step 7: Smoke test — add a minimal event listener to `src/App.tsx`**
+- [ ] **Step 4: Smoke test — minimal UI in `src/App.tsx`**
 
 ```typescript
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import type { AnnotatedLine } from "./types/subtitle";
 
 export default function App() {
+  const [ready, setReady] = useState(false);
+  const [progress, setProgress] = useState(0);
+
   useEffect(() => {
-    const unlisten = listen<AnnotatedLine>("subtitle-line", (e) => {
-      console.log("subtitle-line:", e.payload);
-    });
-    return () => { unlisten.then(f => f()); };
+    invoke<boolean>("check_model").then(setReady);
+    listen<number>("model-download-progress", e => setProgress(e.payload));
+    listen("model-download-done", () => setReady(true));
+    listen<AnnotatedLine>("subtitle-line", e => console.log("subtitle:", e.payload));
   }, []);
+
+  if (!ready) return (
+    <div>
+      <p>Downloading model... {Math.round(progress * 100)}%</p>
+      <button onClick={() => invoke("start_model_download")}>Download</button>
+    </div>
+  );
 
   return (
     <div>
@@ -1374,13 +1405,13 @@ export default function App() {
 }
 ```
 
-Run `npm run tauri dev`, click Start, speak into your mic — check browser console for `subtitle-line` events with `tokens` arrays.
+Run `npm run tauri dev`. On first run: click Download, watch progress. After download, click Start, speak — check console for `subtitle-line` events.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add src-tauri/src src/App.tsx
-git commit -m "feat: wire audio+STT pipeline, emit annotated subtitle-line IPC events"
+git commit -m "feat: wire audio→whisper-rs pipeline with VAD gating, model download flow, IPC events"
 ```
 
 ---
@@ -1393,8 +1424,10 @@ git commit -m "feat: wire audio+STT pipeline, emit annotated subtitle-line IPC e
 - ✅ ECDICT in-memory HashMap, 100k entries, single-line definitions (Task 3)
 - ✅ Aho-Corasick longest-match-wins, phrase suppresses contained word, color thresholds (Task 4)
 - ✅ ScreenCaptureKit — system audio + mic, 16kHz PCM (Task 5)
-- ✅ faster-whisper small model + silero-VAD, JSON output (Task 6)
-- ✅ Pipeline orchestration — audio→stt→annotate→IPC event (Task 7)
+- ✅ whisper-rs (whisper.cpp, small model, Metal GPU), RMS VAD gating (Task 6)
+- ✅ First-launch model download with progress events (Task 6)
+- ✅ Pipeline orchestration — audio→whisper-rs→annotate→IPC event (Task 7)
+- ✅ App Store compatible — no Python runtime, model is data file not executable
 - ⚠️ `line_id` / `meeting_id` in AnnotatedLine are stubbed as 0 — wired in Plan B when meeting management is implemented
 - ⚠️ Vocabulary loading into Aho-Corasick uses empty list — wired in Plan B after vocabulary CRUD commands
 

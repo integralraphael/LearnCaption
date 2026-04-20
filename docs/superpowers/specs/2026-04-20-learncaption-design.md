@@ -195,6 +195,37 @@ Uses macOS `AVSpeechSynthesizer` — system-native, English quality equivalent t
 
 ---
 
+## Distribution & App Store
+
+**Target:** Mac App Store
+
+**App bundle size:** ~40MB
+- App binary + Swift audio sidecar: ~10MB
+- ECDICT (filtered to 100k entries): ~25MB
+- No Python runtime, no bundled model
+
+**Whisper model — first-launch download:**
+On first launch, a setup screen downloads the whisper.cpp `small` model (~500MB) to `~/Library/Application Support/LearnCaption/models/`. Progress bar shown. App is unusable until download completes. Model is a data file (weights), not executable code — App Store review permits this. Standard practice for on-device AI apps.
+
+**STT runtime — whisper-rs (not Python):**
+The Python faster-whisper sidecar is replaced by `whisper-rs`, a Rust crate that links whisper.cpp as a static library. This runs entirely within the Tauri Rust process — no sidecar, no Python, no sandbox issues. Metal GPU acceleration on Apple Silicon via whisper.cpp's Core ML backend.
+
+**VAD:** whisper.cpp built-in `no_speech_prob` threshold, supplemented by simple RMS energy gating before sending chunks to inference. No external VAD library needed.
+
+**Required entitlements (`src-tauri/entitlements.plist`):**
+```xml
+<key>com.apple.security.device.audio-input</key><true/>
+<key>com.apple.security.screen-recording</key><true/>
+<key>com.apple.security.network.client</key><true/>  <!-- for model download -->
+<key>com.apple.security.files.user-selected.read-write</key><true/>
+```
+
+**Required Info.plist keys:**
+- `NSMicrophoneUsageDescription` — "LearnCaption needs microphone access to transcribe your meetings."
+- `NSScreenCaptureUsageDescription` — "LearnCaption needs screen recording permission to capture meeting audio."
+
+---
+
 ## Out of Scope (Future Phases)
 
 - **Speaker diarization** — voice embedding + clustering to label speakers; user assigns names to labels
