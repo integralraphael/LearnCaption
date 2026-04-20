@@ -1,0 +1,174 @@
+# LearnCaption — Design Spec
+
+**Date:** 2026-04-20  
+**Status:** Approved
+
+## Overview
+
+LearnCaption is a macOS desktop app that helps non-native English speakers keep up in meetings (Google Meet, Zoom, Teams) by showing real-time bilingual subtitles with inline vocabulary annotations. After a meeting, users can review the transcript, look up words in context, and build a personal vocabulary book.
+
+---
+
+## MVP Scope
+
+Two features shipped together:
+
+1. **Real-time subtitles** — capture system audio + microphone, transcribe to English, annotate difficult/known vocabulary words with inline Chinese definitions
+2. **Vocabulary highlighting** — words from the user's vocab book are highlighted in subtitles with color intensity proportional to occurrence frequency
+
+Post-meeting review (transcript + vocab lookup + TTS) is part of the same MVP.
+
+Out of scope for MVP: speaker diarization, AI idiom/phrase suggestions, Windows support.
+
+---
+
+## Architecture
+
+**Framework:** Tauri (Rust backend + React/TypeScript frontend)  
+**Platform:** macOS first (ScreenCaptureKit), Windows to follow later
+
+```
+React Frontend  ←→  Tauri IPC  ←→  Rust Backend
+```
+
+### Frontend (React + TypeScript)
+- Floating draggable subtitle window (always-on-top)
+- Vocabulary book UI
+- Post-meeting review page
+- TTS playback button
+
+### Backend (Rust)
+- Audio capture engine (ScreenCaptureKit via Swift sidecar)
+- faster-whisper STT (Python sidecar, small model + VAD)
+- ECDICT local dictionary lookup
+- SQLite database (via tauri-plugin-sql)
+- AVSpeechSynthesizer TTS (via Swift sidecar)
+
+### IPC Events / Commands
+| Direction | Type | Purpose |
+|-----------|------|---------|
+| Backend → Frontend | event `subtitle-line` | Push new transcribed + annotated line |
+| Frontend → Backend | command `query-word` | Look up word definition + vocab status |
+| Frontend → Backend | command `add-to-vocab` | Mark word as unknown |
+| Frontend → Backend | command `mark-mastered` | Set familiarity = 5 |
+| Frontend → Backend | command `speak-text` | Trigger AVSpeechSynthesizer |
+
+---
+
+## Audio Pipeline
+
+```
+System Audio + Mic
+      ↓
+ScreenCaptureKit (Swift sidecar)   — macOS 13+ API, captures mixed audio
+      ↓
+faster-whisper (Python sidecar)    — small model, VAD-triggered inference
+      ↓                              target latency: ~1.5s end-to-end
+Word-level annotation (Rust)       — ECDICT lookup + vocab status check
+      ↓
+IPC event → React subtitle render
+```
+
+**Chunking strategy:** VAD (Voice Activity Detection) detects end-of-phrase and triggers inference immediately, rather than waiting for a fixed time window. This keeps latency at ~1.5s on Apple Silicon.
+
+**Model:** faster-whisper `small` — same accuracy as OpenAI whisper.cpp small, 2-4x faster inference via CTranslate2 INT8 quantization. No quality trade-off.
+
+---
+
+## Subtitle Window UI
+
+- Floating card, semi-transparent frosted glass effect
+- User can drag to any screen position
+- Each word rendered as an inline flex unit: English word on top, Chinese definition directly below (same column)
+- Only annotated words show Chinese text; unannotated words reserve the same line height (no layout shift)
+
+**Word annotation logic:**
+- Show definition for words that are: (a) in the user's vocab book, OR (b) estimated above the user's vocabulary level
+- Do not annotate common/known words
+
+**Vocabulary level estimation:**
+- Map the user's vocab book entries against word-frequency tiers (CET4 / CET6 / TOEFL / GRE)
+- Infer upper bound of user's vocabulary level from which tier their unknown words fall in
+- Words above that tier threshold are auto-annotated as difficult
+
+**Highlight color by occurrence frequency:**
+| State | Color | Condition |
+|-------|-------|-----------|
+| AI-detected difficult | Yellow | First appearance, not in vocab book |
+| Vocab book (low freq) | Orange | In vocab book, seen 2–4 times |
+| Vocab book (high freq) | Red | In vocab book, seen 5+ times |
+| Mastered | None | familiarity = 5 |
+
+---
+
+## Data Model (SQLite)
+
+### `meetings`
+| Column | Type | Notes |
+|--------|------|-------|
+| id | INTEGER PK | |
+| title | TEXT | User-editable label |
+| started_at | DATETIME | |
+| ended_at | DATETIME | |
+| audio_path | TEXT | Local file path |
+
+### `transcript_lines`
+| Column | Type | Notes |
+|--------|------|-------|
+| id | INTEGER PK | |
+| meeting_id | INTEGER FK | → meetings |
+| text | TEXT | English sentence from Whisper |
+| timestamp_ms | INTEGER | Offset from meeting start |
+| speaker_label | TEXT | Null in MVP; reserved for diarization |
+
+### `words`
+| Column | Type | Notes |
+|--------|------|-------|
+| id | INTEGER PK | |
+| word | TEXT UNIQUE | Unique constraint, used for lookups |
+| definition | TEXT | From ECDICT |
+| familiarity | INTEGER | 0 = unknown → 5 = mastered |
+| occurrence_count | INTEGER | Total across all meetings |
+| added_at | DATETIME | |
+| mastered_at | DATETIME | Set when familiarity reaches 5 |
+
+### `word_sentences`
+| Column | Type | Notes |
+|--------|------|-------|
+| id | INTEGER PK | |
+| word_id | INTEGER FK | → words.id |
+| line_id | INTEGER FK | → transcript_lines.id |
+| meeting_id | INTEGER FK | → meetings.id (for fast filtering) |
+| created_at | DATETIME | |
+
+**Index:** `word_sentences(word_id)` — ensures sub-millisecond lookup of all sentences for a word.
+
+---
+
+## Post-Meeting Review
+
+After a meeting ends, the review page shows the full transcript. Users can:
+
+1. Click any word → open word detail panel showing:
+   - Word, pronunciation hint, ECDICT definition
+   - All context sentences where it appeared (from `word_sentences` JOIN `transcript_lines`)
+   - 🔊 button per sentence (AVSpeechSynthesizer reads the full sentence)
+   - "Mark as mastered" button → sets `familiarity = 5`, removes from future highlights
+2. Highlight new unknown words directly in the transcript (adds to vocab book)
+3. See a summary table of all vocab-book words that appeared in this meeting
+
+---
+
+## TTS
+
+Uses macOS `AVSpeechSynthesizer` — system-native, English quality equivalent to Siri voices, fully offline, zero model files, no API cost. Called via the Swift sidecar, triggered by Tauri IPC command `speak-text` with the sentence string.
+
+---
+
+## Out of Scope (Future Phases)
+
+- **Speaker diarization** — voice embedding + clustering to label speakers; user assigns names to labels
+- **AI phrase suggestions** — post-meeting LLM summary of idioms, collocations, good expressions (Gemma-2B via llama.cpp)
+- **Vocabulary level report** — statistical comparison against CET4/CET6/TOEFL wordlists
+- **Windows support** — WASAPI loopback audio capture; faster-whisper and SQLite layers are already cross-platform
+- **Cloud STT option** — Deepgram streaming for users who prefer lower latency over local privacy
