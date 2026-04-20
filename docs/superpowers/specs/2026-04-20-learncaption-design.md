@@ -40,7 +40,7 @@ React Frontend  ←→  Tauri IPC  ←→  Rust Backend
 ### Backend (Rust)
 - Audio capture engine (ScreenCaptureKit via Swift sidecar)
 - faster-whisper STT (Python sidecar, small model + VAD)
-- ECDICT local dictionary lookup
+- ECDICT dictionary — loaded into memory HashMap at startup (~30-40MB RAM)
 - SQLite database (via tauri-plugin-sql)
 - AVSpeechSynthesizer TTS (via Swift sidecar)
 
@@ -72,6 +72,22 @@ IPC event → React subtitle render
 **Chunking strategy:** VAD (Voice Activity Detection) detects end-of-phrase and triggers inference immediately, rather than waiting for a fixed time window. This keeps latency at ~1.5s on Apple Silicon.
 
 **Model:** faster-whisper `small` — same accuracy as OpenAI whisper.cpp small, 2-4x faster inference via CTranslate2 INT8 quantization. No quality trade-off.
+
+---
+
+## Dictionary
+
+**Source:** [ECDICT](https://github.com/skywind3000/ECDICT) — open-source English-Chinese dictionary, ~3.5M entries, distributed as a SQLite file (~50MB). Covers CET4/6, TOEFL, GRE, business English. MIT license, bundled with the app.
+
+**Lookup strategy — in-memory HashMap:**
+
+At app startup, Rust loads ~100k common entries from the ECDICT SQLite file into a `HashMap<String, String>` (entry → definition). Memory cost: ~30-40MB. All real-time subtitle annotation queries hit this HashMap — O(1) lookup, nanosecond latency, zero disk I/O during meetings.
+
+Rare words not in the HashMap fall back to an async SQLite query (does not block subtitle rendering).
+
+**Aho-Corasick automaton (for user vocabulary):**
+
+The user's `vocabulary` table (their personal words + phrases) is loaded separately into an Aho-Corasick automaton at startup and rebuilt whenever the vocabulary changes. This enables simultaneous multi-pattern matching across all user entries — both single words and multi-word phrases — in a single O(n) pass over the subtitle text. Longest-match-wins semantics ensure phrases suppress their contained words.
 
 ---
 
