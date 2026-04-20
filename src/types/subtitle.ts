@@ -1,3 +1,6 @@
+// NOTE: All corresponding Rust structs MUST use #[serde(rename_all = "camelCase")]
+// to match these camelCase field names when serialized over Tauri IPC.
+
 export interface WordToken {
   text: string;
   definition: string | null;   // null = no annotation
