@@ -23,7 +23,10 @@ pub fn run() {
             let ecdict_path = app
                 .path()
                 .resolve("resources/ecdict.db", BaseDirectory::Resource)?;
-            let dict = EcdictDictionary::load(ecdict_path.to_str().unwrap(), 100_000)?;
+            let dict = EcdictDictionary::load(
+                ecdict_path.to_str().ok_or("ECDICT path is not valid UTF-8")?,
+                100_000,
+            )?;
             app.manage(Arc::new(dict));
 
             Ok(())

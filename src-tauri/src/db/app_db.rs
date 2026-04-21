@@ -10,10 +10,12 @@ pub fn open_app_db(app: &AppHandle) -> rusqlite::Result<AppDb> {
     let db_path = app
         .path()
         .app_data_dir()
-        .expect("no app data dir")
+        .map_err(|e| rusqlite::Error::InvalidPath(e.to_string().into()))?
         .join("learncaption.db");
     std::fs::create_dir_all(db_path.parent().unwrap()).ok();
-    let conn = schema::open(db_path.to_str().unwrap())?;
+    let path_str = db_path.to_str()
+        .ok_or_else(|| rusqlite::Error::InvalidPath(db_path.clone().into()))?;
+    let conn = schema::open(path_str)?;
     Ok(Arc::new(Mutex::new(conn)))
 }
 
