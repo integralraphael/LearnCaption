@@ -21,10 +21,7 @@ function getCaptionContainer() {
 function getCaptionText() {
   const container = getCaptionContainer();
   if (!container) return "";
-  // Try known class first, then fall back to the deepest div with longest text
-  const known = container.querySelector('.ygicle');
-  if (known) return known.textContent?.trim() || "";
-  // Fallback: find the child div with the most text (caption accumulator)
+  // Find the leaf div with the most text — the caption accumulator
   let best = null, bestLen = 0;
   container.querySelectorAll('div').forEach(el => {
     const t = el.textContent?.trim() || "";
