@@ -41,11 +41,10 @@ pub fn add_entry(
          ON CONFLICT(entry) DO UPDATE SET definition = excluded.definition",
         rusqlite::params![entry.to_lowercase(), entry_type, definition],
     ).map_err(|e| e.to_string())?;
-    let id = conn.last_insert_rowid();
     let row = conn.query_row(
         "SELECT id, entry, type, definition, familiarity, occurrence_count, added_at, mastered_at
-         FROM vocabulary WHERE id = ?1",
-        rusqlite::params![id],
+         FROM vocabulary WHERE entry = ?1",
+        rusqlite::params![entry.to_lowercase()],
         row_to_dto,
     ).map_err(|e| e.to_string())?;
     Ok(row)
