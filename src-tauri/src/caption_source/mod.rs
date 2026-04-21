@@ -30,6 +30,10 @@ impl CaptionPipeline {
         Self { annotator, db, meeting_id, app }
     }
 
+    pub fn app(&self) -> &AppHandle {
+        &self.app
+    }
+
     pub fn process(&self, raw: RawCaption) {
         if raw.text.trim().is_empty() {
             return;

@@ -42,6 +42,8 @@ pub fn run() {
             commands::pipeline::start_model_download,
             commands::pipeline::start_recording,
             commands::pipeline::stop_recording,
+            commands::capture::start_browser_capture,
+            commands::capture::stop_browser_capture,
             commands::vocabulary::add_entry,
             commands::vocabulary::mark_mastered,
             commands::vocabulary::list_entries,
