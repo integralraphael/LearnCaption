@@ -19,11 +19,21 @@ function getCaptionContainer() {
          document.querySelector('[aria-label="Captions"][role="region"]');
 }
 
-// Caption text divs are leaf divs (no div children) with actual text.
+// Each speaker block is a direct div child of the container with 2+ div children:
+//   [0] avatar/name area  [last] caption text (leaf, no div descendants)
 function getCaptionLeaves(container) {
-  return Array.from(container.querySelectorAll('div')).filter(
-    el => el.querySelectorAll('div').length === 0 && (el.textContent?.trim().length || 0) > 3
-  );
+  const results = [];
+  for (const block of container.children) {
+    if (block.tagName !== 'DIV') continue;
+    const divKids = Array.from(block.children).filter(el => el.tagName === 'DIV');
+    if (divKids.length < 2) continue;
+    const captionDiv = divKids[divKids.length - 1];
+    if (captionDiv.querySelector('div') === null &&
+        (captionDiv.textContent?.trim().length || 0) > 3) {
+      results.push(captionDiv);
+    }
+  }
+  return results;
 }
 
 const observer = new MutationObserver(() => {
