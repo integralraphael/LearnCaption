@@ -41,7 +41,7 @@ pub async fn start_recording(
 
     let dict = EcdictDictionary::load(ecdict_path.to_str().unwrap(), 100_000)
         .map_err(|e| e.to_string())?;
-    let mut annotator = Annotator::new(dict);
+    let mut annotator = Annotator::new(Arc::new(dict));
     annotator.rebuild_automaton(vec![]); // vocab wired in Plan B
 
     let mut audio = AudioSidecar::spawn(&app).map_err(|e| e.to_string())?;

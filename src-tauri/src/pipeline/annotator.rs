@@ -36,13 +36,13 @@ pub struct VocabEntry {
 }
 
 pub struct Annotator {
-    dict: EcdictDictionary,
+    dict: std::sync::Arc<crate::dictionary::EcdictDictionary>,
     automaton: Option<AhoCorasick>,
     vocab_entries: Vec<VocabEntry>,
 }
 
 impl Annotator {
-    pub fn new(dict: EcdictDictionary) -> Self {
+    pub fn new(dict: std::sync::Arc<crate::dictionary::EcdictDictionary>) -> Self {
         Self {
             dict,
             automaton: None,
@@ -172,8 +172,8 @@ mod tests {
     use super::*;
     use crate::dictionary::EcdictDictionary;
 
-    fn make_dict() -> EcdictDictionary {
-        EcdictDictionary::load("resources/ecdict.db", 100_000).unwrap()
+    fn make_dict() -> std::sync::Arc<EcdictDictionary> {
+        std::sync::Arc::new(EcdictDictionary::load("resources/ecdict.db", 100_000).unwrap())
     }
 
     fn make_annotator_with_vocab(entries: Vec<VocabEntry>) -> Annotator {
