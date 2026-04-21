@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "LearnCaption",
+  "version": "0.1.0",
+  "description": "Sends meeting captions to LearnCaption desktop app for vocabulary annotations",
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://meet.google.com/*"],
+      "js": ["content-meet.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://www.youtube.com/*", "https://youtube.com/*"],
+      "js": ["content-youtube.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "host_permissions": [
+    "https://meet.google.com/*",
+    "https://www.youtube.com/*"
+  ]
+}
