@@ -1,51 +1,33 @@
-import { useState } from "react";
-import reactLogo from "./assets/react.svg";
+import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import "./App.css";
+import { useEffect, useState } from "react";
+import type { AnnotatedLine } from "./types/subtitle";
 
-function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
+export default function App() {
+  const [ready, setReady] = useState(false);
+  const [progress, setProgress] = useState(0);
 
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke("greet", { name }));
-  }
+  useEffect(() => {
+    invoke<boolean>("check_model").then(setReady);
+    listen<number>("model-download-progress", (e) => setProgress(e.payload));
+    listen("model-download-done", () => setReady(true));
+    listen<AnnotatedLine>("subtitle-line", (e) =>
+      console.log("subtitle:", e.payload)
+    );
+  }, []);
+
+  if (!ready)
+    return (
+      <div>
+        <p>Downloading model... {Math.round(progress * 100)}%</p>
+        <button onClick={() => invoke("start_model_download")}>Download</button>
+      </div>
+    );
 
   return (
-    <main className="container">
-      <h1>Welcome to Tauri + React</h1>
-
-      <div className="row">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
-
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
-        />
-        <button type="submit">Greet</button>
-      </form>
-      <p>{greetMsg}</p>
-    </main>
+    <div>
+      <button onClick={() => invoke("start_recording")}>Start</button>
+      <button onClick={() => invoke("stop_recording")}>Stop</button>
+    </div>
   );
 }
-
-export default App;
