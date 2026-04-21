@@ -143,12 +143,9 @@ impl Annotator {
                 }
             } else {
                 let word_text = &raw[wstart.._wend];
-                // Strip punctuation from the word for lookup
-                let lookup_key: String = word_text.chars().filter(|c| c.is_alphabetic() || *c == '\'').collect();
-                let definition = self.dict.lookup(&lookup_key).map(|s| s.to_string());
                 tokens.push(WordToken {
                     text: word_text.to_string(),
-                    definition,
+                    definition: None,
                     vocab_id: None,
                     color: None,
                 });
