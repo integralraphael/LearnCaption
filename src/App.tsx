@@ -6,13 +6,15 @@ import { SubtitleWindow } from "./components/SubtitleWindow";
 import { VocabBook } from "./components/VocabBook";
 import { ReviewPage } from "./components/ReviewPage";
 import { WordDetail } from "./components/WordDetail";
+import { SourceBadge } from "./components/SourceBadge";
 
 type View = "subtitle" | "vocab" | "review";
+type CaptureMode = "none" | "whisper" | "browser";
 
 export default function App() {
   const [modelReady, setModelReady] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
-  const [recording, setRecording] = useState(false);
+  const [captureMode, setCaptureMode] = useState<CaptureMode>("none");
   const [view, setView] = useState<View>("subtitle");
   const [clickedWord, setClickedWord] = useState<string | null>(null);
 
@@ -26,14 +28,20 @@ export default function App() {
     };
   }, []);
 
-  const handleStart = async () => {
+  const handleStartWhisper = async () => {
     await invoke("start_recording");
-    setRecording(true);
+    setCaptureMode("whisper");
+  };
+
+  const handleStartBrowser = async () => {
+    await invoke("start_browser_capture");
+    setCaptureMode("browser");
   };
 
   const handleStop = async () => {
-    await invoke("stop_recording");
-    setRecording(false);
+    if (captureMode === "whisper") await invoke("stop_recording");
+    else if (captureMode === "browser") await invoke("stop_browser_capture");
+    setCaptureMode("none");
   };
 
   const handleWordClick = (token: WordToken) => {
@@ -72,7 +80,10 @@ export default function App() {
     <div style={{ ...styles.screen, flexDirection: "column", padding: 0 }}>
       {/* Navigation */}
       <div style={styles.nav} data-tauri-drag-region>
-        <span style={{ color: "#60a5fa", fontWeight: 700, fontSize: "14px" }}>LearnCaption</span>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <span style={{ color: "#60a5fa", fontWeight: 700, fontSize: "14px" }}>LearnCaption</span>
+          <SourceBadge />
+        </div>
         <div style={{ display: "flex", gap: "4px" }}>
           {(["subtitle", "vocab", "review"] as View[]).map((v) => (
             <button
@@ -84,12 +95,24 @@ export default function App() {
             </button>
           ))}
         </div>
-        <button
-          onClick={recording ? handleStop : handleStart}
-          style={{ ...styles.primaryBtn, padding: "5px 14px", fontSize: "12px", background: recording ? "#7f1d1d" : "#1e3a5f", color: recording ? "#fca5a5" : "#60a5fa" }}
-        >
-          {recording ? "⏹ Stop" : "⏺ Start"}
-        </button>
+        {captureMode === "none" ? (
+          <div style={{ display: "flex", gap: "6px" }}>
+            <button onClick={handleStartWhisper} style={styles.primaryBtn}>⏺ Whisper</button>
+            <button
+              onClick={handleStartBrowser}
+              style={{ ...styles.primaryBtn, background: "#064e3b", color: "#34d399" }}
+            >
+              🌐 Browser
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={handleStop}
+            style={{ ...styles.primaryBtn, background: "#7f1d1d", color: "#fca5a5" }}
+          >
+            ⏹ Stop
+          </button>
+        )}
       </div>
 
       {/* Content */}
@@ -141,9 +164,9 @@ const styles = {
     background: "#1e3a5f",
     border: "none",
     color: "#60a5fa",
-    padding: "8px 20px",
+    padding: "6px 14px",
     borderRadius: "8px",
-    fontSize: "14px",
+    fontSize: "12px",
     cursor: "pointer",
   } as React.CSSProperties,
 };
