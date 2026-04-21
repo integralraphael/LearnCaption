@@ -15,7 +15,13 @@ impl AudioSidecar {
         } else {
             "x86_64-apple-darwin"
         };
-        let binary = exe_dir.join(format!("audio-capture-{}", suffix));
+        // Production: binary has target-triple suffix; `tauri dev`: no suffix.
+        let binary_suffixed = exe_dir.join(format!("audio-capture-{}", suffix));
+        let binary = if binary_suffixed.exists() {
+            binary_suffixed
+        } else {
+            exe_dir.join("audio-capture")
+        };
         let child = Command::new(&binary)
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
