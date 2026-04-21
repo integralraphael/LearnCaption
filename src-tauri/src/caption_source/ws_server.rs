@@ -28,19 +28,17 @@ fn now_ms() -> i64 {
         .as_millis() as i64
 }
 
-/// Start the WebSocket server. Runs until the tokio task is aborted via JoinHandle::abort().
-pub async fn run(pipeline: Arc<CaptionPipeline>) {
-    let listener = match TcpListener::bind(format!("127.0.0.1:{WS_PORT}")).await {
-        Ok(l) => l,
-        Err(e) => {
-            let _ = pipeline.app().emit(
-                "pipeline-error",
-                format!("WS server failed to bind on port {WS_PORT}: {e}"),
-            );
-            return;
-        }
-    };
+/// Bind the WebSocket port. Call this BEFORE creating any DB state
+/// so bind failures don't leave orphaned rows.
+pub async fn bind() -> Result<TcpListener, String> {
+    TcpListener::bind(format!("127.0.0.1:{WS_PORT}"))
+        .await
+        .map_err(|e| format!("WS server failed to bind on port {WS_PORT}: {e}"))
+}
 
+/// Accept connections from the already-bound listener.
+/// Runs until the tokio task is aborted via JoinHandle::abort().
+pub async fn run(listener: TcpListener, pipeline: Arc<CaptionPipeline>) {
     while let Ok((stream, _)) = listener.accept().await {
         let pipeline = pipeline.clone();
         tokio::spawn(async move {
@@ -49,6 +47,7 @@ pub async fn run(pipeline: Arc<CaptionPipeline>) {
                 Err(_) => return,
             };
             let (_, mut read) = ws.split();
+            let mut last_platform = String::new();
 
             while let Some(Ok(Message::Text(text))) = read.next().await {
                 let msg = match parse_message(&text) {
@@ -60,16 +59,18 @@ pub async fn run(pipeline: Arc<CaptionPipeline>) {
                 }
                 if let Some(caption_text) = msg.text {
                     let platform = msg.platform.as_deref().unwrap_or("browser");
-                    let _ = pipeline.app().emit("source-changed", platform);
+                    if platform != last_platform {
+                        let _ = pipeline.app().emit("source-changed", platform);
+                        last_platform = platform.to_string();
+                    }
                     pipeline.process(RawCaption {
                         text: caption_text,
                         timestamp_ms: now_ms(),
                     });
                 }
             }
-
-            // Client disconnected
-            let _ = pipeline.app().emit("source-changed", "none");
+            // Note: do NOT emit source-changed "none" here.
+            // stop_browser_capture is the authoritative state transition.
         });
     }
 }

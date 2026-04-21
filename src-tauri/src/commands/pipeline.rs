@@ -36,6 +36,14 @@ pub async fn start_recording(
         return Err("model not downloaded yet".to_string());
     }
 
+    // Guard: prevent conflict with browser capture
+    {
+        let ws = state.ws_task.lock().unwrap();
+        if ws.is_some() {
+            return Err("browser capture is already running".to_string());
+        }
+    }
+
     let vocab_entries = load_vocab_entries(&db).map_err(|e| e.to_string())?;
     let mut annotator = Annotator::new(dict.inner().clone());
     annotator.rebuild_automaton(vocab_entries);
