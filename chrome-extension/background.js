@@ -1,31 +1,36 @@
 // Service worker: manages WebSocket connection to LearnCaption desktop app.
-// Content scripts send messages here; we relay them over the WebSocket.
+// Connects lazily — only when a caption message arrives, not on startup.
 
 const WS_URL = "ws://127.0.0.1:52340";
 let ws = null;
+const queue = [];
 
 function connect() {
+  if (ws && ws.readyState !== WebSocket.CLOSED) return;
   ws = new WebSocket(WS_URL);
 
   ws.onopen = () => {
     console.log("[LearnCaption] Connected to desktop app");
+    queue.splice(0).forEach(msg => ws.send(msg));
   };
 
   ws.onclose = () => {
-    // Auto-reconnect every 3 seconds while app is open
-    setTimeout(connect, 3000);
+    ws = null;
   };
 
   ws.onerror = () => {
-    ws.close(); // triggers onclose → reconnect
+    // Suppress — expected when desktop app isn't running yet
+    ws?.close();
   };
 }
 
-connect();
-
-// Relay caption messages from content scripts to the desktop app
 chrome.runtime.onMessage.addListener((message) => {
-  if (message.type === "caption" && ws?.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify(message));
+  if (message.type !== "caption") return;
+  const json = JSON.stringify(message);
+  if (ws?.readyState === WebSocket.OPEN) {
+    ws.send(json);
+  } else {
+    queue.push(json);
+    connect(); // connect on demand; queued messages sent on open
   }
 });
