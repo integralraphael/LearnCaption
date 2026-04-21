@@ -31,7 +31,10 @@ pub fn run() {
 
             Ok(())
         })
-        .manage(PipelineState(Arc::new(Mutex::new(None))))
+        .manage(PipelineState {
+            sidecar: Arc::new(Mutex::new(None)),
+            current_meeting_id: Arc::new(Mutex::new(None)),
+        })
         .invoke_handler(tauri::generate_handler![
             commands::pipeline::check_model,
             commands::pipeline::start_model_download,
