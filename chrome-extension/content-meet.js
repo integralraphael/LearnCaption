@@ -3,9 +3,10 @@
 // Known caption container selectors (in order of preference).
 // Meet's DOM changes with updates; the aria-live fallback is most stable.
 const CAPTION_SELECTORS = [
-  '[jsname="tgaKEf"]',       // Caption window (Meet 2024)
-  '[data-is-focused="true"]', // Active caption line
-  '[aria-live="polite"]',    // Accessibility fallback
+  '.ygicle.VbkSUe',          // Caption text container (Meet 2025)
+  '.nMcdL.bj4p3b',           // Caption window fallback
+  '[jsname="tgaKEf"]',       // Older Meet versions
+  '[aria-live="polite"]',
   '[aria-live="assertive"]',
 ];
 
