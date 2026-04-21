@@ -24,7 +24,9 @@ export function SubtitleWindow({ onWordClick }: Props) {
   }, []);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (lines.length > 0) {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
   }, [lines]);
 
   return (

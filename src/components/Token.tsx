@@ -1,6 +1,6 @@
 import type { WordToken } from "../types/subtitle";
 
-const COLOR_MAP: Record<string, string> = {
+const COLOR_MAP: Record<"yellow" | "orange" | "red", string> = {
   yellow: "#fbbf24",
   orange: "#f97316",
   red:    "#ef4444",
