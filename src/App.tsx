@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useState } from "react";
 import type { WordToken } from "./types/subtitle";
 import { SubtitleWindow } from "./components/SubtitleWindow";
@@ -81,6 +82,12 @@ export default function App() {
       {/* Navigation */}
       <div style={styles.nav} data-tauri-drag-region>
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          {/* Window controls */}
+          <div style={{ display: "flex", gap: "6px", marginRight: "4px" }} data-tauri-drag-region="false">
+            <span onClick={() => getCurrentWindow().close()}    style={styles.winBtn("#ef4444")} title="关闭" />
+            <span onClick={() => getCurrentWindow().minimize()} style={styles.winBtn("#f59e0b")} title="最小化" />
+            <span onClick={() => getCurrentWindow().toggleMaximize()} style={styles.winBtn("#22c55e")} title="最大化" />
+          </div>
           <span style={{ color: "#60a5fa", fontWeight: 700, fontSize: "14px" }}>LearnCaption</span>
           <SourceBadge />
         </div>
@@ -135,6 +142,15 @@ export default function App() {
 }
 
 const styles = {
+  winBtn: (color: string): React.CSSProperties => ({
+    width: "12px",
+    height: "12px",
+    borderRadius: "50%",
+    background: color,
+    display: "inline-block",
+    cursor: "pointer",
+    flexShrink: 0,
+  }),
   screen: {
     background: "#0f172a",
     minHeight: "100vh",
