@@ -9,7 +9,7 @@ impl SttEngine {
     /// Load the model from disk. Call only after model_exists() is true.
     pub fn load(model_path: &Path) -> Result<Self, String> {
         let ctx = WhisperContext::new_with_params(
-            model_path.to_str().unwrap(),
+            model_path.to_str().ok_or_else(|| "model path is not valid UTF-8".to_string())?,
             WhisperContextParameters::default(),
         )
         .map_err(|e| format!("failed to load whisper model: {e}"))?;

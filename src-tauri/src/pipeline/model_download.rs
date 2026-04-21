@@ -54,6 +54,7 @@ pub async fn download_model(app: AppHandle) {
             Ok(bytes) => {
                 if file.write_all(&bytes).is_err() {
                     let _ = app.emit("model-download-error", "write failed");
+                    std::fs::remove_file(&dest).ok();
                     return;
                 }
                 downloaded += bytes.len() as u64;
@@ -64,6 +65,7 @@ pub async fn download_model(app: AppHandle) {
             }
             Err(e) => {
                 let _ = app.emit("model-download-error", e.to_string());
+                std::fs::remove_file(&dest).ok();
                 return;
             }
         }
