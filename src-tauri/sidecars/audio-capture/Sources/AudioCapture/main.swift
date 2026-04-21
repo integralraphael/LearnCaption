@@ -73,10 +73,10 @@ class AudioCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate {
     private func appendCMSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
         guard let blockBuf = CMSampleBufferGetDataBuffer(sampleBuffer) else { return }
         var length = 0
-        var ptr: UnsafeMutablePointer<Int8>?
-        CMBlockBufferGetDataPointer(blockBuf, atOffset: 0, lengthAtOffsetOut: nil,
-                                    totalLengthOut: &length, dataPointerOut: &ptr)
-        guard let ptr else { return }
+        var dataPointer: UnsafeMutablePointer<Int8>?
+        let status = CMBlockBufferGetDataPointer(blockBuf, atOffset: 0, lengthAtOffsetOut: nil,
+                                                 totalLengthOut: &length, dataPointerOut: &dataPointer)
+        guard status == noErr, let ptr = dataPointer else { return }
         let floats = UnsafeBufferPointer(
             start: UnsafeRawPointer(ptr).assumingMemoryBound(to: Float.self),
             count: length / MemoryLayout<Float>.size)

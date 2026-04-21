@@ -23,14 +23,15 @@ impl AudioSidecar {
         Ok(Self { child })
     }
 
-    /// Take the stdout handle. Call only once.
-    pub fn take_stdout(&mut self) -> std::process::ChildStdout {
-        self.child.stdout.take().expect("stdout already taken")
+    /// Take the stdout handle. Returns None if already taken.
+    pub fn take_stdout(&mut self) -> Option<std::process::ChildStdout> {
+        self.child.stdout.take()
     }
 }
 
 impl Drop for AudioSidecar {
     fn drop(&mut self) {
         let _ = self.child.kill();
+        let _ = self.child.wait(); // reap the zombie
     }
 }
