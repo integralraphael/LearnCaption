@@ -14,9 +14,9 @@ function sendCaption(text) {
 }
 
 function getCaptionContainer() {
-  return document.querySelector('[jscontroller="KPn5nb"]') ||
-         document.querySelector('[aria-label="字幕"][role="region"]') ||
-         document.querySelector('[aria-label="Captions"][role="region"]');
+  return document.querySelector('[aria-label="字幕"][role="region"]') ||
+         document.querySelector('[aria-label="Captions"][role="region"]') ||
+         document.querySelector('[jscontroller="KPn5nb"]');
 }
 
 // Each speaker block is a direct div child of the container with 2+ div children:
