@@ -27,6 +27,9 @@ pub struct WordQueryResult {
 }
 
 /// Add a word/phrase to the vocabulary book.
+/// Note: the Aho-Corasick annotator is built once when recording starts (in start_recording).
+/// Words added mid-session will be saved to DB but will only be highlighted in subtitles
+/// after recording is stopped and restarted.
 #[tauri::command]
 pub fn add_entry(
     entry: String,

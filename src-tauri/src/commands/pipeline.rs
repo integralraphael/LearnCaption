@@ -122,10 +122,13 @@ pub async fn start_recording(
                         // Save transcript line, get real line_id
                         let line_id: i64 = {
                             let conn = db2.lock().unwrap();
-                            conn.execute(
+                            if let Err(e) = conn.execute(
                                 "INSERT INTO transcript_lines (meeting_id, text, timestamp_ms) VALUES (?1, ?2, ?3)",
                                 rusqlite::params![meeting_id, &text, ts],
-                            ).ok();
+                            ) {
+                                let _ = app2.emit("pipeline-error", format!("transcript insert failed: {e}"));
+                                continue;
+                            }
                             conn.last_insert_rowid()
                         };
 
