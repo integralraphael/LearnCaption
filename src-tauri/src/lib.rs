@@ -42,6 +42,12 @@ pub fn run() {
             commands::pipeline::stop_recording,
             commands::vocabulary::add_entry,
             commands::vocabulary::mark_mastered,
+            commands::vocabulary::list_entries,
+            commands::vocabulary::query_word,
+            commands::review::list_meetings,
+            commands::review::get_transcript,
+            commands::review::get_vocab_sentences,
+            commands::tts::speak_text,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
