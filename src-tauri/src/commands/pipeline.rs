@@ -47,6 +47,9 @@ pub async fn start_recording(
     let mut audio = AudioSidecar::spawn(&app).map_err(|e| e.to_string())?;
     let audio_stdout = audio.take_stdout().ok_or("audio stdout already taken")?;
 
+    // Store in state BEFORE spawning thread — prevents stop_recording from missing it
+    *state.0.lock().unwrap() = Some(audio);
+
     let app2 = app.clone();
     let annotator = Arc::new(Mutex::new(annotator));
 
@@ -104,14 +107,13 @@ pub async fn start_recording(
                         let _ = app2.emit("subtitle-line", &line);
                     }
                 }
-                session_start_ms += (pcm_buffer.len() / SAMPLE_RATE * 1000) as i64;
+                session_start_ms += (pcm_buffer.len() as f64 / SAMPLE_RATE as f64 * 1000.0) as i64;
                 pcm_buffer.clear();
                 silent_chunks = 0;
             }
         }
     });
 
-    *state.0.lock().unwrap() = Some(audio);
     Ok(())
 }
 
