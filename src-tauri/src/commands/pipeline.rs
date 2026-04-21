@@ -2,6 +2,7 @@ use std::io::Read;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, State};
 
+use crate::caption_source::{CaptionPipeline, RawCaption};
 use crate::db::{load_vocab_entries, AppDb};
 use crate::dictionary::EcdictDictionary;
 use crate::pipeline::{
@@ -11,15 +12,14 @@ use crate::pipeline::{
 pub struct PipelineState {
     pub sidecar: Arc<Mutex<Option<AudioSidecar>>>,
     pub current_meeting_id: Arc<Mutex<Option<i64>>>,
+    pub ws_task: Arc<Mutex<Option<tauri::async_runtime::JoinHandle<()>>>>,
 }
 
-/// Returns true if the whisper model is already downloaded.
 #[tauri::command]
 pub fn check_model(app: AppHandle) -> bool {
     model_exists(&app)
 }
 
-/// Start downloading the model.
 #[tauri::command]
 pub async fn start_model_download(app: AppHandle) {
     download_model(app).await;
@@ -36,12 +36,10 @@ pub async fn start_recording(
         return Err("model not downloaded yet".to_string());
     }
 
-    // Load vocab entries from DB and build annotator
     let vocab_entries = load_vocab_entries(&db).map_err(|e| e.to_string())?;
     let mut annotator = Annotator::new(dict.inner().clone());
     annotator.rebuild_automaton(vocab_entries);
 
-    // Create meeting record
     let meeting_id: i64 = {
         let conn = db.lock().map_err(|e| e.to_string())?;
         conn.execute(
@@ -52,21 +50,23 @@ pub async fn start_recording(
     };
     *state.current_meeting_id.lock().unwrap() = Some(meeting_id);
 
-    // Set window always-on-top during recording
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.set_always_on_top(true);
     }
 
+    let pipeline = Arc::new(CaptionPipeline {
+        annotator: Arc::new(Mutex::new(annotator)),
+        db: db.inner().clone(),
+        meeting_id: state.current_meeting_id.clone(),
+        app: app.clone(),
+    });
+
     let model_p = model_path(&app);
     let mut audio = AudioSidecar::spawn(&app).map_err(|e| e.to_string())?;
     let audio_stdout = audio.take_stdout().ok_or("audio stdout already taken")?;
-
-    // Store sidecar BEFORE spawning thread
     *state.sidecar.lock().unwrap() = Some(audio);
 
     let app2 = app.clone();
-    let annotator = Arc::new(Mutex::new(annotator));
-    let db2 = db.inner().clone();
 
     std::thread::spawn(move || {
         let engine = match SttEngine::load(&model_p) {
@@ -89,16 +89,10 @@ pub async fn start_recording(
         let mut reader = std::io::BufReader::new(audio_stdout);
 
         loop {
-            if reader.read_exact(&mut buf[..4]).is_err() {
-                break;
-            }
+            if reader.read_exact(&mut buf[..4]).is_err() { break; }
             let len = u32::from_le_bytes(buf[..4].try_into().unwrap()) as usize;
-            if len > CHUNK_BYTES {
-                break;
-            }
-            if reader.read_exact(&mut buf[4..4 + len]).is_err() {
-                break;
-            }
+            if len > CHUNK_BYTES { break; }
+            if reader.read_exact(&mut buf[4..4 + len]).is_err() { break; }
 
             let samples: Vec<f32> = buf[4..4 + len]
                 .chunks_exact(4)
@@ -115,53 +109,22 @@ pub async fn start_recording(
 
             if should_infer && !pcm_buffer.is_empty() {
                 if let Ok(segments) = engine.transcribe(&pcm_buffer) {
-                    let ann = annotator.lock().unwrap();
                     for (text, offset_ms) in segments {
-                        let ts = session_start_ms + offset_ms;
-
-                        // Save transcript line, get real line_id
-                        let line_id: i64 = {
-                            let conn = db2.lock().unwrap();
-                            if let Err(e) = conn.execute(
-                                "INSERT INTO transcript_lines (meeting_id, text, timestamp_ms) VALUES (?1, ?2, ?3)",
-                                rusqlite::params![meeting_id, &text, ts],
-                            ) {
-                                let _ = app2.emit("pipeline-error", format!("transcript insert failed: {e}"));
-                                continue;
-                            }
-                            conn.last_insert_rowid()
-                        };
-
-                        // Annotate with real IDs
-                        let line = ann.annotate(&text, line_id, meeting_id, ts);
-
-                        // Save vocab_sentences + update occurrence_counts
-                        {
-                            let conn = db2.lock().unwrap();
-                            for token in &line.tokens {
-                                if let Some(vocab_id) = token.vocab_id {
-                                    conn.execute(
-                                        "INSERT INTO vocab_sentences (vocab_id, line_id, meeting_id) VALUES (?1, ?2, ?3)",
-                                        rusqlite::params![vocab_id, line_id, meeting_id],
-                                    ).ok();
-                                    conn.execute(
-                                        "UPDATE vocabulary SET occurrence_count = occurrence_count + 1 WHERE id = ?1",
-                                        rusqlite::params![vocab_id],
-                                    ).ok();
-                                }
-                            }
-                        }
-
-                        let _ = app2.emit("subtitle-line", &line);
+                        pipeline.process(RawCaption {
+                            text,
+                            timestamp_ms: session_start_ms + offset_ms,
+                        });
                     }
                 }
-                session_start_ms += (pcm_buffer.len() as f64 / SAMPLE_RATE as f64 * 1000.0) as i64;
+                session_start_ms +=
+                    (pcm_buffer.len() as f64 / SAMPLE_RATE as f64 * 1000.0) as i64;
                 pcm_buffer.clear();
                 silent_chunks = 0;
             }
         }
     });
 
+    let _ = app.emit("source-changed", "whisper");
     Ok(())
 }
 
@@ -171,10 +134,8 @@ pub async fn stop_recording(
     state: State<'_, PipelineState>,
     db: State<'_, AppDb>,
 ) -> Result<(), String> {
-    // Drop sidecar → kills Swift process
     *state.sidecar.lock().unwrap() = None;
 
-    // Update meeting ended_at
     if let Some(meeting_id) = *state.current_meeting_id.lock().unwrap() {
         let conn = db.lock().map_err(|e| e.to_string())?;
         conn.execute(
@@ -184,11 +145,11 @@ pub async fn stop_recording(
     }
     *state.current_meeting_id.lock().unwrap() = None;
 
-    // Remove always-on-top
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.set_always_on_top(false);
     }
 
+    let _ = app.emit("source-changed", "none");
     Ok(())
 }
 
@@ -207,8 +168,7 @@ mod tests {
         let id = {
             let conn = db.lock().unwrap();
             conn.execute(
-                "INSERT INTO meetings (title, started_at) VALUES ('Test', datetime('now'))",
-                [],
+                "INSERT INTO meetings (title, started_at) VALUES ('Test', datetime('now'))", [],
             ).unwrap();
             conn.last_insert_rowid()
         };
@@ -221,8 +181,7 @@ mod tests {
         let meeting_id = {
             let conn = db.lock().unwrap();
             conn.execute(
-                "INSERT INTO meetings (title, started_at) VALUES ('Test', datetime('now'))",
-                [],
+                "INSERT INTO meetings (title, started_at) VALUES ('Test', datetime('now'))", [],
             ).unwrap();
             conn.last_insert_rowid()
         };

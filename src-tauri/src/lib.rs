@@ -1,4 +1,5 @@
 mod commands;
+mod caption_source;
 mod db;
 mod dictionary;
 mod pipeline;
@@ -34,6 +35,7 @@ pub fn run() {
         .manage(PipelineState {
             sidecar: Arc::new(Mutex::new(None)),
             current_meeting_id: Arc::new(Mutex::new(None)),
+            ws_task: Arc::new(Mutex::new(None)),
         })
         .invoke_handler(tauri::generate_handler![
             commands::pipeline::check_model,
