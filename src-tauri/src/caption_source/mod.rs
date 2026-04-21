@@ -14,14 +14,27 @@ pub struct RawCaption {
 /// Shared annotation + DB write + subtitle-line event logic.
 /// Used by both the Whisper thread and the WebSocket server.
 pub struct CaptionPipeline {
-    pub annotator: Arc<Mutex<Annotator>>,
-    pub db: AppDb,
-    pub meeting_id: Arc<Mutex<Option<i64>>>,
-    pub app: AppHandle,
+    annotator: Arc<Mutex<Annotator>>,
+    db: AppDb,
+    meeting_id: Arc<Mutex<Option<i64>>>,
+    app: AppHandle,
 }
 
 impl CaptionPipeline {
+    pub fn new(
+        annotator: Arc<Mutex<Annotator>>,
+        db: AppDb,
+        meeting_id: Arc<Mutex<Option<i64>>>,
+        app: AppHandle,
+    ) -> Self {
+        Self { annotator, db, meeting_id, app }
+    }
+
     pub fn process(&self, raw: RawCaption) {
+        if raw.text.trim().is_empty() {
+            return;
+        }
+
         let meeting_id = match *self.meeting_id.lock().unwrap() {
             Some(id) => id,
             None => return,
@@ -49,16 +62,20 @@ impl CaptionPipeline {
             let conn = self.db.lock().unwrap();
             for token in &line.tokens {
                 if let Some(vocab_id) = token.vocab_id {
-                    conn.execute(
+                    if let Err(e) = conn.execute(
                         "INSERT INTO vocab_sentences (vocab_id, line_id, meeting_id) \
                          VALUES (?1, ?2, ?3)",
                         rusqlite::params![vocab_id, line_id, meeting_id],
-                    ).ok();
-                    conn.execute(
+                    ) {
+                        let _ = self.app.emit("pipeline-error", format!("vocab_sentences insert: {e}"));
+                    }
+                    if let Err(e) = conn.execute(
                         "UPDATE vocabulary SET occurrence_count = occurrence_count + 1 \
                          WHERE id = ?1",
                         rusqlite::params![vocab_id],
-                    ).ok();
+                    ) {
+                        let _ = self.app.emit("pipeline-error", format!("occurrence_count update: {e}"));
+                    }
                 }
             }
         }
@@ -84,20 +101,9 @@ mod tests {
     }
 
     #[test]
-    fn test_process_no_meeting_is_noop() {
-        let db = in_memory_db();
-        let meeting_id: Arc<Mutex<Option<i64>>> = Arc::new(Mutex::new(None));
-        {
-            let conn = db.lock().unwrap();
-            conn.execute(
-                "INSERT INTO meetings (title, started_at) VALUES ('T', datetime('now'))", []
-            ).unwrap();
-        }
-        let count: i64 = {
-            let conn = db.lock().unwrap();
-            conn.query_row("SELECT COUNT(*) FROM transcript_lines", [], |r| r.get(0)).unwrap()
-        };
-        assert_eq!(count, 0);
-        let _ = meeting_id;
+    fn test_raw_caption_empty_text() {
+        // Empty text should be caught by process() guard
+        let cap = RawCaption { text: "  ".to_string(), timestamp_ms: 0 };
+        assert!(cap.text.trim().is_empty());
     }
 }

@@ -54,12 +54,12 @@ pub async fn start_recording(
         let _ = win.set_always_on_top(true);
     }
 
-    let pipeline = Arc::new(CaptionPipeline {
-        annotator: Arc::new(Mutex::new(annotator)),
-        db: db.inner().clone(),
-        meeting_id: state.current_meeting_id.clone(),
-        app: app.clone(),
-    });
+    let pipeline = Arc::new(CaptionPipeline::new(
+        Arc::new(Mutex::new(annotator)),
+        db.inner().clone(),
+        state.current_meeting_id.clone(),
+        app.clone(),
+    ));
 
     let model_p = model_path(&app);
     let mut audio = AudioSidecar::spawn(&app).map_err(|e| e.to_string())?;
@@ -136,14 +136,17 @@ pub async fn stop_recording(
 ) -> Result<(), String> {
     *state.sidecar.lock().unwrap() = None;
 
-    if let Some(meeting_id) = *state.current_meeting_id.lock().unwrap() {
-        let conn = db.lock().map_err(|e| e.to_string())?;
-        conn.execute(
-            "UPDATE meetings SET ended_at = datetime('now') WHERE id = ?1",
-            rusqlite::params![meeting_id],
-        ).map_err(|e| e.to_string())?;
+    {
+        let mut id_guard = state.current_meeting_id.lock().unwrap();
+        if let Some(meeting_id) = *id_guard {
+            let conn = db.lock().map_err(|e| e.to_string())?;
+            conn.execute(
+                "UPDATE meetings SET ended_at = datetime('now') WHERE id = ?1",
+                rusqlite::params![meeting_id],
+            ).map_err(|e| e.to_string())?;
+        }
+        *id_guard = None;
     }
-    *state.current_meeting_id.lock().unwrap() = None;
 
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.set_always_on_top(false);
