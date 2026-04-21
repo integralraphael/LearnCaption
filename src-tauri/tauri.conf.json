@@ -12,9 +12,15 @@
   "app": {
     "windows": [
       {
-        "title": "learncaption",
-        "width": 800,
-        "height": 600
+        "label": "main",
+        "title": "LearnCaption",
+        "width": 900,
+        "height": 620,
+        "minWidth": 600,
+        "minHeight": 400,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": false
       }
     ],
     "security": {
