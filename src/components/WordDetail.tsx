@@ -13,6 +13,7 @@ export function WordDetail({ word, onClose, onAddToVocab }: Props) {
   const [sentences, setSentences] = useState<VocabSentence[]>([]);
 
   useEffect(() => {
+    setSentences([]);
     invoke<WordQueryResult>("query_word", { word }).then(setResult).catch(console.error);
   }, [word]);
 
@@ -31,13 +32,17 @@ export function WordDetail({ word, onClose, onAddToVocab }: Props) {
   const handleAddToVocab = async () => {
     if (!result) return;
     const definition = result.definition ?? "";
-    const entry = await invoke<VocabEntry>("add_entry", {
-      entry: word,
-      definition,
-      entryType: "word",
-    });
-    setResult((prev) => prev ? { ...prev, vocabEntry: entry } : prev);
-    onAddToVocab?.(entry);
+    try {
+      const entry = await invoke<VocabEntry>("add_entry", {
+        entry: word,
+        definition,
+        entryType: "word",
+      });
+      setResult((prev) => prev ? { ...prev, vocabEntry: entry } : prev);
+      onAddToVocab?.(entry);
+    } catch (e) {
+      console.error("add_entry failed:", e);
+    }
   };
 
   const handleMastered = async () => {
@@ -115,7 +120,7 @@ export function WordDetail({ word, onClose, onAddToVocab }: Props) {
               style={{ background: "#1e293b", borderRadius: "6px", padding: "8px", marginBottom: "6px", fontSize: "13px", color: "#cbd5e1", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}
             >
               <span style={{ flex: 1, lineHeight: "1.6" }}>
-                {s.text.split(new RegExp(`(\\b${word}\\b)`, "gi")).map((part, i) =>
+                {s.text.split(new RegExp(`(\\b${word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b)`, "gi")).map((part, i) =>
                   part.toLowerCase() === word.toLowerCase()
                     ? <mark key={i} style={{ background: "transparent", color: "#fbbf24", fontWeight: 600 }}>{part}</mark>
                     : part

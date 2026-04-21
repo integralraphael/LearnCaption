@@ -18,8 +18,12 @@ export default function App() {
 
   useEffect(() => {
     invoke<boolean>("check_model").then(setModelReady);
-    listen<number>("model-download-progress", (e) => setDownloadProgress(e.payload));
-    listen("model-download-done", () => setModelReady(true));
+    const u1 = listen<number>("model-download-progress", (e) => setDownloadProgress(e.payload));
+    const u2 = listen("model-download-done", () => setModelReady(true));
+    return () => {
+      u1.then((f) => f());
+      u2.then((f) => f());
+    };
   }, []);
 
   const handleStart = async () => {

@@ -16,8 +16,12 @@ export function ReviewPage() {
   const openMeeting = async (meeting: Meeting) => {
     setSelected(meeting);
     setActiveWord(null);
-    const transcript = await invoke<TranscriptLine[]>("get_transcript", { meetingId: meeting.id });
-    setLines(transcript);
+    try {
+      const transcript = await invoke<TranscriptLine[]>("get_transcript", { meetingId: meeting.id });
+      setLines(transcript);
+    } catch (e) {
+      console.error("get_transcript failed:", e);
+    }
   };
 
   const formatTime = (iso: string) =>
