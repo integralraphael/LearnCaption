@@ -1,18 +1,22 @@
 use std::process::{Child, Command, Stdio};
-use tauri::path::BaseDirectory;
-use tauri::Manager;
 
 pub struct AudioSidecar {
     child: Child,
 }
 
 impl AudioSidecar {
-    pub fn spawn(app: &tauri::AppHandle) -> std::io::Result<Self> {
-        let binary = app
-            .path()
-            .resolve("binaries/audio-capture", BaseDirectory::Resource)
-            .expect("audio-capture binary not found");
-        let child = Command::new(binary)
+    pub fn spawn(_app: &tauri::AppHandle) -> std::io::Result<Self> {
+        let exe = std::env::current_exe()?;
+        let exe_dir = exe.parent().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::NotFound, "exe directory not found")
+        })?;
+        let suffix = if cfg!(target_arch = "aarch64") {
+            "aarch64-apple-darwin"
+        } else {
+            "x86_64-apple-darwin"
+        };
+        let binary = exe_dir.join(format!("audio-capture-{}", suffix));
+        let child = Command::new(&binary)
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .spawn()?;
