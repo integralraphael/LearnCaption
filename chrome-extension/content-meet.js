@@ -6,14 +6,17 @@ if (window.__learnCaptionAttached) {
 } else {
   window.__learnCaptionAttached = true;
 
-  // Last text we actually SENT per speaker (key = avatar src or name)
-  const sentTexts = new Map();
-  let debounceTimer = null;
+  // blockState: block element → last text seen in that block
+  // Using the block DOM element as key (WeakMap) is correct because:
+  //   - same speaker in a NEW block (after a pause) = new utterance → WeakMap sees new element → isNew:true
+  //   - same block updated by Meet = continuation → same element reference → isNew:false
+  const blockState = new WeakMap();
 
-  function sendCaption(text) {
+  function sendCaption(text, speaker, avatar, isNew) {
     const trimmed = text.trim();
     if (!trimmed || trimmed.length < 4) return;
-    chrome.runtime.sendMessage({ type: "caption", text: trimmed, platform: "meet" });
+    console.log("[LearnCaption] send:", { isNew, speaker, text: trimmed });
+    chrome.runtime.sendMessage({ type: "caption", text: trimmed, speaker, avatar, isNew, platform: "meet" });
   }
 
   function getCaptionContainer() {
@@ -22,60 +25,87 @@ if (window.__learnCaptionAttached) {
            document.querySelector('[jscontroller="KPn5nb"]');
   }
 
-  function getSpeakerBlocks(container) {
-    return Array.from(container.children).filter(block => {
-      if (block.tagName !== 'DIV') return false;
-      const divKids = Array.from(block.children).filter(el => el.tagName === 'DIV');
-      return divKids.length >= 2;
-    });
+  function isSpeakerBlock(el) {
+    if (el.tagName !== 'DIV') return false;
+    const divKids = Array.from(el.children).filter(c => c.tagName === 'DIV');
+    return divKids.length >= 2;
   }
 
-  function getSpeakerKey(block) {
-    const img = block.querySelector('img');
-    if (img?.src) return img.src;
+  function getSpeakerInfo(block) {
     const span = block.querySelector('span');
-    return span?.textContent?.trim() || "unknown";
+    const name = span?.textContent?.trim() || "unknown";
+    const img = block.querySelector('img');
+    const avatar = img?.src || "";
+    return { name, avatar };
   }
 
   function getCaptionDiv(block) {
     const divKids = Array.from(block.children).filter(el => el.tagName === 'DIV');
-    const last = divKids[divKids.length - 1];
-    return (last && last.querySelector('div') === null) ? last : null;
+    return divKids.length >= 1 ? divKids[divKids.length - 1] : null;
   }
 
-  // Called when debounce fires: read CURRENT caption state and send accumulated text
-  function flushCaptions() {
-    const container = getCaptionContainer();
-    if (!container) return;
-    for (const block of getSpeakerBlocks(container)) {
-      const captionDiv = getCaptionDiv(block);
-      if (!captionDiv) continue;
-      const current = captionDiv.textContent?.trim() || "";
-      if (!current) continue;
-      const key = getSpeakerKey(block);
-      const sent = sentTexts.get(key) || "";
-      if (current === sent) continue;
-      let toSend;
-      if (current.startsWith(sent) && sent.length > 0) {
-        toSend = current.slice(sent.length).trim();
-      } else {
-        toSend = current;
+  // Find the last speaker block (active one — last 2 divs in container are UI elements)
+  function getActiveBlock(container) {
+    const children = Array.from(container.children);
+    for (let i = children.length - 1; i >= 0; i--) {
+      if (isSpeakerBlock(children[i])) return children[i];
+    }
+    return null;
+  }
+
+  let debounceTimer = null;
+
+  function processBlock(block) {
+    const captionDiv = getCaptionDiv(block);
+    if (!captionDiv) return;
+    const current = (captionDiv.textContent || "").replace(/\s+/g, " ").trim();
+    if (!current) return;
+    const { name, avatar } = getSpeakerInfo(block);
+
+    const stored = blockState.get(block);
+    if (current === stored) return;
+
+    // Send full text every time — Meet's ASR may revise earlier words,
+    // so diffs are unreliable. The backend replaces the current line.
+    const isNew = (stored === undefined);
+    blockState.set(block, current);
+    sendCaption(current, name, avatar, isNew);
+  }
+
+  // On attach: scan all existing speaker blocks and set state as baseline
+  // without sending them (avoids flooding the UI with old history).
+  function initialFlush(container) {
+    const children = Array.from(container.children);
+    for (const child of children) {
+      if (isSpeakerBlock(child)) {
+        const captionDiv = getCaptionDiv(child);
+        if (captionDiv) {
+          const current = (captionDiv.textContent || "").replace(/\s+/g, " ").trim();
+          if (current) blockState.set(child, current);
+        }
       }
-      sentTexts.set(key, current);
-      if (toSend.length >= 4) sendCaption(toSend);
     }
   }
 
-  const observer = new MutationObserver(() => {
+  // On each mutation: only process the active (last) speaker block
+  function flushActive() {
     clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(flushCaptions, 1500);
-  });
+    debounceTimer = setTimeout(() => {
+      const container = getCaptionContainer();
+      if (!container) return;
+      const block = getActiveBlock(container);
+      if (block) processBlock(block);
+    }, 600);
+  }
+
+  const observer = new MutationObserver(flushActive);
 
   function attachObserver() {
     const container = getCaptionContainer();
     if (container) {
       observer.observe(container, { childList: true, subtree: true, characterData: true });
       console.log("[LearnCaption] Observing Meet captions");
+      initialFlush(container);
     } else {
       setTimeout(attachObserver, 1000);
     }

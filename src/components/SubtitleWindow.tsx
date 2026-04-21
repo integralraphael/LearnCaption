@@ -14,13 +14,25 @@ export function SubtitleWindow({ onWordClick }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const unlisten = listen<AnnotatedLine>("subtitle-line", (e) => {
+    let active = true;
+    let unlistenFn: (() => void) | undefined;
+    listen<AnnotatedLine>("subtitle-line", (e) => {
+      if (!active) return;
+      const incoming = e.payload;
       setLines((prev) => {
-        const next = [...prev, e.payload];
-        return next.slice(-MAX_LINES);
+        if (incoming.isNew || prev.length === 0) {
+          // New utterance — add a fresh line
+          return [...prev, incoming].slice(-MAX_LINES);
+        } else {
+          // Continuation — replace the last line with updated full text
+          return [...prev.slice(0, -1), incoming];
+        }
       });
-    });
-    return () => { unlisten.then((f) => f()); };
+    }).then((f) => { unlistenFn = f; });
+    return () => {
+      active = false;
+      unlistenFn?.();
+    };
   }, []);
 
   useEffect(() => {

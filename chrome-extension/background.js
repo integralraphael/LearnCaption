@@ -16,6 +16,8 @@ function connect() {
 
   ws.onclose = () => {
     ws = null;
+    // Retry if there are queued messages waiting for a server to come up
+    if (queue.length > 0) setTimeout(connect, 1000);
   };
 
   ws.onerror = () => {
@@ -28,6 +30,7 @@ chrome.runtime.onMessage.addListener((message) => {
   if (message.type !== "caption") return;
   const json = JSON.stringify(message);
   if (ws?.readyState === WebSocket.OPEN) {
+    console.log("[LearnCaption] ws.send:", json);
     ws.send(json);
   } else {
     queue.push(json);
