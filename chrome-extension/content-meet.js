@@ -9,17 +9,29 @@ if (window.__learnCaptionAttached) {
   // blockState: block element → array of sentence strings already sent
   const blockState = new WeakMap();
 
-  // Safely send a message; if the extension context is gone, tear everything down.
+  // Connect a port to detect extension reload BEFORE any chrome API throws.
+  // When the extension is reloaded the port fires onDisconnect immediately,
+  // giving us a clean signal to stop all chrome API calls.
+  let contextAlive = false;
+  try {
+    const port = chrome.runtime.connect({ name: "learncaption-content" });
+    contextAlive = true;
+    port.onDisconnect.addListener(() => {
+      contextAlive = false;
+      teardown();
+    });
+  } catch (_) {
+    // Extension not running — stay silent
+  }
+
   function safeSend(msg) {
+    if (!contextAlive) return;
     try {
-      if (!chrome.runtime?.id) { teardown(); return; }
-      // Pass a no-op callback so Chrome routes errors through lastError
-      // instead of reporting them as uncaught console errors.
-      // Do NOT teardown here — lastError can also mean "port closed" (normal).
       chrome.runtime.sendMessage(msg, () => {
-        try { void chrome.runtime.lastError; } catch (_) { teardown(); }
+        try { void chrome.runtime.lastError; } catch (_) {}
       });
-    } catch (e) {
+    } catch (_) {
+      contextAlive = false;
       teardown();
     }
   }
