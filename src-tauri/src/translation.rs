@@ -134,21 +134,30 @@ pub fn ensure_loaded(state: &Arc<Mutex<Option<LoadedModel>>>, model_path: &PathB
 // ── Inference ─────────────────────────────────────────────────────────────────
 
 /// Build the user message content following official HY-MT1.5 prompt templates.
-fn build_user_content(selection: &str) -> String {
-    // 中外互译模板 — no context, just translate the word/phrase directly.
-    // Context template causes the model to translate the full sentence, so we skip it.
-    format!(
-        "将以下文本翻译为中文，注意只需要输出翻译后的结果，不要额外解释：\n\n{selection}"
-    )
+fn build_user_content(selection: &str, context: Option<&str>) -> String {
+    match context {
+        Some(ctx) if !ctx.is_empty() && ctx != selection => {
+            // 上下文翻译模板: full sentence as context, word/phrase as source_text
+            format!(
+                "{ctx}\n参考上面的信息，把下面的文本翻译成中文，注意不需要翻译上文，也不要额外解释：\n{selection}"
+            )
+        }
+        _ => {
+            // 中外互译模板: no context
+            format!(
+                "将以下文本翻译为中文，注意只需要输出翻译后的结果，不要额外解释：\n\n{selection}"
+            )
+        }
+    }
 }
 
 /// Run translation inference. Must be called from a blocking context.
 pub fn translate_sync(
     loaded: &LoadedModel,
     selection: &str,
-    _context: Option<&str>,
+    context: Option<&str>,
 ) -> Result<String, String> {
-    let content = build_user_content(selection);
+    let content = build_user_content(selection, context);
 
     // Use the model's built-in chat template (Hunyuan tokens, not standard ChatML)
     let tmpl = loaded.model.chat_template(None)

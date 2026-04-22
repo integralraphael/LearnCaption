@@ -51,10 +51,11 @@ export function SubtitleWindow({ onWordClick, onPhraseSelect }: Props) {
     const sel = window.getSelection();
     const text = sel?.toString().trim();
     if (!text || text.split(/\s+/).length < 2) return;
+    // Use the line's rawText instead of selection string (avoids grabbing definition text)
     const node = sel?.anchorNode;
     const lineEl = (node instanceof HTMLElement ? node : node?.parentElement)?.closest("[data-raw-text]");
-    const sentenceText = lineEl?.getAttribute("data-raw-text") ?? "";
-    onPhraseSelect(text, sentenceText);
+    const rawText = lineEl?.getAttribute("data-raw-text") ?? "";
+    onPhraseSelect(rawText || text, rawText);
     sel?.removeAllRanges();
   };
 

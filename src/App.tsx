@@ -19,6 +19,7 @@ export default function App() {
   const [view, setView] = useState<View>("subtitle");
   const [clickedWord, setClickedWord] = useState<string | null>(null);
   const [clickedContext, setClickedContext] = useState<string>("");
+  const [clickedIsPhrase, setClickedIsPhrase] = useState(false);
 
   useEffect(() => {
     invoke<boolean>("check_model").then(setModelReady);
@@ -52,6 +53,7 @@ export default function App() {
     if (cleaned.length > 0) {
       setClickedWord(cleaned.toLowerCase());
       setClickedContext(sentenceText);
+      setClickedIsPhrase(false);
     }
   };
 
@@ -133,10 +135,11 @@ export default function App() {
             <SubtitleWindow onWordClick={handleWordClick} onPhraseSelect={(phrase, ctx) => {
               setClickedWord(phrase.toLowerCase());
               setClickedContext(ctx);
+              setClickedIsPhrase(true);
             }} />
             {clickedWord && (
               <div style={{ marginTop: "12px" }}>
-                <WordDetail word={clickedWord} context={clickedContext} onClose={() => setClickedWord(null)} />
+                <WordDetail word={clickedWord} context={clickedContext} isPhrase={clickedIsPhrase} onClose={() => setClickedWord(null)} />
               </div>
             )}
           </>
