@@ -16,7 +16,9 @@ if (window.__learnCaptionAttached) {
       // Pass a no-op callback so Chrome routes errors through lastError
       // instead of reporting them as uncaught console errors.
       // Do NOT teardown here — lastError can also mean "port closed" (normal).
-      chrome.runtime.sendMessage(msg, () => { void chrome.runtime.lastError; });
+      chrome.runtime.sendMessage(msg, () => {
+        try { void chrome.runtime.lastError; } catch (_) { teardown(); }
+      });
     } catch (e) {
       teardown();
     }
