@@ -13,7 +13,14 @@ if (window.__learnCaptionAttached) {
   function safeSend(msg) {
     try {
       if (!chrome.runtime?.id) { teardown(); return; }
-      chrome.runtime.sendMessage(msg);
+      // Pass a no-op callback so Chrome routes errors through lastError
+      // instead of reporting them as uncaught console errors.
+      chrome.runtime.sendMessage(msg, () => {
+        if (chrome.runtime.lastError) {
+          // Context invalidated or background not reachable — stop everything.
+          teardown();
+        }
+      });
     } catch (e) {
       teardown();
     }
