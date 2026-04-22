@@ -40,9 +40,6 @@ async function checkAndConnect() {
   }
 }
 
-// Keep content-script ports alive so onDisconnect fires on extension reload.
-chrome.runtime.onConnect.addListener((_port) => { /* no-op, just hold it */ });
-
 chrome.runtime.onMessage.addListener((message) => {
   // CC is active — check /status and connect WS if app is capturing
   if (message.type === "ensure_connected") {

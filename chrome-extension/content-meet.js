@@ -9,20 +9,8 @@ if (window.__learnCaptionAttached) {
   // blockState: block element → array of sentence strings already sent
   const blockState = new WeakMap();
 
-  // Connect a port to detect extension reload BEFORE any chrome API throws.
-  // When the extension is reloaded the port fires onDisconnect immediately,
-  // giving us a clean signal to stop all chrome API calls.
-  let contextAlive = false;
-  try {
-    const port = chrome.runtime.connect({ name: "learncaption-content" });
-    contextAlive = true;
-    port.onDisconnect.addListener(() => {
-      contextAlive = false;
-      teardown();
-    });
-  } catch (_) {
-    // Extension not running — stay silent
-  }
+  // Set to false on first chrome API failure; all subsequent calls become no-ops.
+  let contextAlive = true;
 
   function safeSend(msg) {
     if (!contextAlive) return;
