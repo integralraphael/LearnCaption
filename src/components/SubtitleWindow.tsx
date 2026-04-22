@@ -50,8 +50,7 @@ export function SubtitleWindow({ onWordClick, onPhraseSelect }: Props) {
     if (!onPhraseSelect) return;
     const sel = window.getSelection();
     const text = sel?.toString().trim();
-    if (!text || text.split(/\s+/).length < 2) return; // only for multi-word
-    // Find the closest subtitle line for context
+    if (!text || text.split(/\s+/).length < 2) return;
     const node = sel?.anchorNode;
     const lineEl = (node instanceof HTMLElement ? node : node?.parentElement)?.closest("[data-raw-text]");
     const sentenceText = lineEl?.getAttribute("data-raw-text") ?? "";
@@ -60,6 +59,24 @@ export function SubtitleWindow({ onWordClick, onPhraseSelect }: Props) {
   };
 
   return (
+    <>
+    <style>{`
+      .lc-line[data-speaker]::before {
+        content: attr(data-speaker);
+        display: inline-block;
+        background: var(--speaker-color, #64748b);
+        color: #fff;
+        font-size: 11px;
+        font-weight: 600;
+        padding: 1px 6px;
+        border-radius: 4px;
+        margin-right: 6px;
+        line-height: 1.6;
+        flex-shrink: 0;
+        align-self: center;
+        user-select: none;
+      }
+    `}</style>
     <div
       onMouseUp={handleMouseUp}
       style={{
@@ -80,8 +97,10 @@ export function SubtitleWindow({ onWordClick, onPhraseSelect }: Props) {
       ) : (
         lines.map((line, i) => (
           <div
+            className="lc-line"
             key={line.lineId + "-" + i}
             data-raw-text={line.rawText}
+            {...(line.speaker ? { "data-speaker": line.speaker } : {})}
             style={{
               lineHeight: "2.2",
               fontSize: "16px",
@@ -90,27 +109,9 @@ export function SubtitleWindow({ onWordClick, onPhraseSelect }: Props) {
               flexWrap: "wrap",
               display: "flex",
               alignItems: "flex-start",
+              ...(line.speakerColor ? { "--speaker-color": line.speakerColor } as React.CSSProperties : {}),
             }}
           >
-            {line.speaker && (
-              <span
-                style={{
-                  display: "inline-block",
-                  background: line.speakerColor ?? "#64748b",
-                  color: "#fff",
-                  fontSize: "11px",
-                  fontWeight: 600,
-                  padding: "1px 6px",
-                  borderRadius: "4px",
-                  marginRight: "6px",
-                  lineHeight: "1.6",
-                  flexShrink: 0,
-                  alignSelf: "center",
-                }}
-              >
-                {line.speaker}
-              </span>
-            )}
             {line.tokens.map((token, j) => (
               <Token
                 key={j}
@@ -123,5 +124,6 @@ export function SubtitleWindow({ onWordClick, onPhraseSelect }: Props) {
       )}
       <div ref={bottomRef} />
     </div>
+    </>
   );
 }
