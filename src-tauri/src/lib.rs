@@ -4,12 +4,14 @@ mod db;
 mod dictionary;
 mod http_server;
 mod pipeline;
+mod translation;
 
 use commands::pipeline::PipelineState;
 use db::open_app_db;
 use dictionary::EcdictDictionary;
 use std::sync::{Arc, Mutex};
 use tauri::{Manager, path::BaseDirectory};
+use translation::TranslationState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -47,6 +49,9 @@ pub fn run() {
             current_meeting_id: Arc::new(Mutex::new(None)),
             ws_task,
         })
+        .manage(TranslationState {
+            loaded: Arc::new(Mutex::new(None)),
+        })
         .invoke_handler(tauri::generate_handler![
             commands::pipeline::check_model,
             commands::pipeline::start_model_download,
@@ -62,6 +67,9 @@ pub fn run() {
             commands::review::get_transcript,
             commands::review::get_vocab_sentences,
             commands::tts::speak_text,
+            commands::translate::translation_model_exists,
+            commands::translate::download_translation_model,
+            commands::translate::translate_selection,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

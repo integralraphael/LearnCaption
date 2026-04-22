@@ -18,6 +18,7 @@ export default function App() {
   const [captureMode, setCaptureMode] = useState<CaptureMode>("none");
   const [view, setView] = useState<View>("subtitle");
   const [clickedWord, setClickedWord] = useState<string | null>(null);
+  const [clickedContext, setClickedContext] = useState<string>("");
 
   useEffect(() => {
     invoke<boolean>("check_model").then(setModelReady);
@@ -45,9 +46,10 @@ export default function App() {
     setCaptureMode("none");
   };
 
-  const handleWordClick = (token: WordToken) => {
+  const handleWordClick = (token: WordToken, sentenceText: string) => {
     if (token.text.match(/^\w+$/)) {
       setClickedWord(token.text.toLowerCase());
+      setClickedContext(sentenceText);
     }
   };
 
@@ -129,7 +131,7 @@ export default function App() {
             <SubtitleWindow onWordClick={handleWordClick} />
             {clickedWord && (
               <div style={{ marginTop: "12px" }}>
-                <WordDetail word={clickedWord} onClose={() => setClickedWord(null)} />
+                <WordDetail word={clickedWord} context={clickedContext} onClose={() => setClickedWord(null)} />
               </div>
             )}
           </>

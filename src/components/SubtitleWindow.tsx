@@ -6,7 +6,7 @@ import { Token } from "./Token";
 const MAX_LINES = 3;
 
 interface Props {
-  onWordClick?: (token: WordToken) => void;
+  onWordClick?: (token: WordToken, sentenceText: string) => void;
 }
 
 export function SubtitleWindow({ onWordClick }: Props) {
@@ -100,7 +100,7 @@ export function SubtitleWindow({ onWordClick }: Props) {
               <Token
                 key={j}
                 token={token}
-                onClick={onWordClick}
+                onClick={onWordClick ? (t) => onWordClick(t, line.rawText) : undefined}
               />
             ))}
           </div>
