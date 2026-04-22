@@ -11,11 +11,10 @@ use llama_cpp_2::{
 };
 use tauri::{AppHandle, Emitter, Manager};
 
-// HY-MT 1.5B GGUF — English→Chinese translation model
-// Verify the URL against the HY-MT Hugging Face repo before first use.
+// HY-MT1.5-1.8B (Tencent Hunyuan MT) — English→Chinese translation model
 const HYMT_URL: &str =
-    "https://huggingface.co/HY-MT/hy-mt-encoder-decoder-1_5B-GGUF/resolve/main/hy-mt-encoder-decoder-1_5B-q4_k_m.gguf";
-const HYMT_FILENAME: &str = "hy-mt-1.5b-q4_k_m.gguf";
+    "https://huggingface.co/tencent/HY-MT1.5-1.8B-GGUF/resolve/main/HY-MT1.5-1.8B-Q4_K_M.gguf";
+const HYMT_FILENAME: &str = "HY-MT1.5-1.8B-Q4_K_M.gguf";
 
 const MAX_OUTPUT_TOKENS: usize = 128;
 const N_CTX: u32 = 1024;
@@ -134,15 +133,22 @@ pub fn ensure_loaded(state: &Arc<Mutex<Option<LoadedModel>>>, model_path: &PathB
 
 // ── Inference ─────────────────────────────────────────────────────────────────
 
+/// Build the prompt using the ChatML format expected by HY-MT1.5 (Qwen2-based chat model).
+/// The model's recommended sampling: temperature=0.7, top_p=0.6, top_k=20, rep_penalty=1.05.
 fn build_prompt(selection: &str, context: Option<&str>) -> String {
-    match context {
+    // Inner content follows the official HY-MT1.5 prompt templates
+    let content = match context {
         Some(ctx) if !ctx.is_empty() && ctx != selection => format!(
             "{ctx}\n参考上面的信息，把下面的文本翻译成中文，注意不需要翻译上文，也不要额外解释：\n{selection}"
         ),
         _ => format!(
             "将以下文本翻译为中文，注意只需要输出翻译后的结果，不要额外解释：\n{selection}"
         ),
-    }
+    };
+
+    // ChatML format (Qwen2 tokenizer template). No BOS token; <|im_start|> is the boundary.
+    // We add <|im_start|>assistant\n to prompt the model to start generating the response.
+    format!("<|im_start|>user\n{content}<|im_end|>\n<|im_start|>assistant\n")
 }
 
 /// Run translation inference. Must be called from a blocking context.
@@ -160,9 +166,10 @@ pub fn translate_sync(
         .new_context(&loaded.backend, ctx_params)
         .map_err(|e| format!("context: {e}"))?;
 
+    // No BOS — ChatML starts with <|im_start|> which is already in the prompt string
     let tokens = loaded
         .model
-        .str_to_token(&prompt, AddBos::Always)
+        .str_to_token(&prompt, AddBos::Never)
         .map_err(|e| format!("tokenize: {e}"))?;
 
     if tokens.is_empty() {
@@ -181,10 +188,13 @@ pub fn translate_sync(
 
     ctx.decode(&mut batch).map_err(|e| format!("decode prompt: {e}"))?;
 
-    // Greedy + low temperature for deterministic translation
+    // Sampling params recommended by HY-MT1.5 README
     let mut sampler = LlamaSampler::chain_simple([
-        LlamaSampler::temp(0.1),
-        LlamaSampler::greedy(),
+        LlamaSampler::penalties(64, 1.05, 0.0, 0.0), // repetition_penalty=1.05, last 64 tokens
+        LlamaSampler::top_k(20),
+        LlamaSampler::top_p(0.6, 1),
+        LlamaSampler::temp(0.7),
+        LlamaSampler::dist(0),                        // sample from resulting distribution
     ]);
 
     let mut output = String::new();
