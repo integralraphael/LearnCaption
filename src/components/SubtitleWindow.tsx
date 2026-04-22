@@ -77,6 +77,25 @@ export function SubtitleWindow({ onWordClick }: Props) {
               alignItems: "flex-start",
             }}
           >
+            {line.speaker && (
+              <span
+                style={{
+                  display: "inline-block",
+                  background: line.speakerColor ?? "#64748b",
+                  color: "#fff",
+                  fontSize: "11px",
+                  fontWeight: 600,
+                  padding: "1px 6px",
+                  borderRadius: "4px",
+                  marginRight: "6px",
+                  lineHeight: "1.6",
+                  flexShrink: 0,
+                  alignSelf: "center",
+                }}
+              >
+                {line.speaker}
+              </span>
+            )}
             {line.tokens.map((token, j) => (
               <Token
                 key={j}

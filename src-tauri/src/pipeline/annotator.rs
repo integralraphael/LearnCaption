@@ -25,6 +25,8 @@ pub struct AnnotatedLine {
     pub timestamp_ms: i64,
     /// "new_block" | "append" | "update"
     pub action: String,
+    pub speaker: Option<String>,
+    pub speaker_color: Option<String>,
 }
 
 /// A single entry from the vocabulary table used to build the automaton.
@@ -96,6 +98,8 @@ impl Annotator {
             raw_text: raw_text.to_string(),
             timestamp_ms,
             action: action.to_string(),
+            speaker: None,
+            speaker_color: None,
         }
     }
 
@@ -262,6 +266,8 @@ mod tests {
             raw_text: "hi".to_string(),
             timestamp_ms: 0,
             action: "new_block".to_string(),
+            speaker: Some("Alice".to_string()),
+            speaker_color: Some("#3b82f6".to_string()),
         };
         let json = serde_json::to_string(&line).unwrap();
         assert!(json.contains("\"lineId\""), "expected camelCase 'lineId'");

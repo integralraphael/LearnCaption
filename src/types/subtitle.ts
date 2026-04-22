@@ -16,4 +16,6 @@ export interface AnnotatedLine {
   timestampMs: number;
   /** "new_block" | "append" | "update" */
   action: string;
+  speaker: string | null;
+  speakerColor: string | null;
 }

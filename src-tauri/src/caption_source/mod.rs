@@ -23,6 +23,23 @@ pub struct RawCaption {
     pub timestamp_ms: i64,
 }
 
+/// Simple hash to pick a stable color index for a speaker name.
+fn speaker_color_index(name: &str) -> usize {
+    let hash: usize = name.bytes().fold(0usize, |acc, b| acc.wrapping_mul(31).wrapping_add(b as usize));
+    hash % SPEAKER_COLORS.len()
+}
+
+const SPEAKER_COLORS: &[&str] = &[
+    "#3b82f6", // blue
+    "#10b981", // emerald
+    "#a855f7", // purple
+    "#f59e0b", // amber
+    "#ef4444", // red
+    "#06b6d4", // cyan
+    "#ec4899", // pink
+    "#84cc16", // lime
+];
+
 /// Shared annotation + DB write + subtitle-line event logic.
 /// Used by both the Whisper thread and the WebSocket server.
 pub struct CaptionPipeline {
@@ -110,10 +127,17 @@ impl CaptionPipeline {
             }
         };
 
-        let line = {
+        let mut line = {
             let ann = self.annotator.lock().unwrap();
             ann.annotate(&raw.text, line_id, meeting_id, raw.timestamp_ms, action_str)
         };
+
+        // Attach speaker info
+        if let Some(ref name) = raw.speaker {
+            let color = SPEAKER_COLORS[speaker_color_index(name)].to_string();
+            line.speaker = Some(name.clone());
+            line.speaker_color = Some(color);
+        }
 
         // Only count vocab on new content (NewBlock / Append).
         // Update is ASR revision of the same sentence — skip to avoid inflated counts.
