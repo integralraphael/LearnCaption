@@ -12,7 +12,7 @@ pub async fn download_translation_model(app: AppHandle) {
     download_hymt(app).await;
 }
 
-/// Translate `selection` (word or phrase) with optional full-sentence `context`.
+/// Translate `selection` (word or phrase) with optional sentence `context`.
 /// Loads the model lazily on first call; stays loaded for subsequent calls.
 #[tauri::command]
 pub async fn translate_selection(
@@ -29,7 +29,6 @@ pub async fn translate_selection(
     let model_path = hymt_model_path(&app);
 
     tauri::async_runtime::spawn_blocking(move || {
-        // Lazy load (no-op if already loaded)
         crate::translation::ensure_loaded(&loaded_arc, &model_path)?;
 
         let guard = loaded_arc.lock().unwrap();

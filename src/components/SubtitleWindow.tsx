@@ -7,9 +7,10 @@ const MAX_LINES = 3;
 
 interface Props {
   onWordClick?: (token: WordToken, sentenceText: string) => void;
+  onPhraseSelect?: (phrase: string, sentenceText: string) => void;
 }
 
-export function SubtitleWindow({ onWordClick }: Props) {
+export function SubtitleWindow({ onWordClick, onPhraseSelect }: Props) {
   const [lines, setLines] = useState<AnnotatedLine[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -45,8 +46,22 @@ export function SubtitleWindow({ onWordClick }: Props) {
     }
   }, [lines]);
 
+  const handleMouseUp = () => {
+    if (!onPhraseSelect) return;
+    const sel = window.getSelection();
+    const text = sel?.toString().trim();
+    if (!text || text.split(/\s+/).length < 2) return; // only for multi-word
+    // Find the closest subtitle line for context
+    const node = sel?.anchorNode;
+    const lineEl = (node instanceof HTMLElement ? node : node?.parentElement)?.closest("[data-raw-text]");
+    const sentenceText = lineEl?.getAttribute("data-raw-text") ?? "";
+    onPhraseSelect(text, sentenceText);
+    sel?.removeAllRanges();
+  };
+
   return (
     <div
+      onMouseUp={handleMouseUp}
       style={{
         background: "rgba(15, 23, 42, 0.85)",
         backdropFilter: "blur(12px)",
@@ -55,7 +70,6 @@ export function SubtitleWindow({ onWordClick }: Props) {
         border: "1px solid rgba(255,255,255,0.08)",
         padding: "14px 18px",
         minHeight: "80px",
-        userSelect: "none",
       }}
       data-tauri-drag-region
     >
@@ -67,6 +81,7 @@ export function SubtitleWindow({ onWordClick }: Props) {
         lines.map((line, i) => (
           <div
             key={line.lineId + "-" + i}
+            data-raw-text={line.rawText}
             style={{
               lineHeight: "2.2",
               fontSize: "16px",

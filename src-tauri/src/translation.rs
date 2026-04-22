@@ -6,7 +6,7 @@ use llama_cpp_2::{
     context::params::LlamaContextParams,
     llama_backend::LlamaBackend,
     llama_batch::LlamaBatch,
-    model::{params::LlamaModelParams, AddBos, LlamaModel},
+    model::{params::LlamaModelParams, AddBos, LlamaChatMessage, LlamaModel},
     sampling::LlamaSampler,
 };
 use tauri::{AppHandle, Emitter, Manager};
@@ -133,31 +133,31 @@ pub fn ensure_loaded(state: &Arc<Mutex<Option<LoadedModel>>>, model_path: &PathB
 
 // ── Inference ─────────────────────────────────────────────────────────────────
 
-/// Build the prompt using the ChatML format expected by HY-MT1.5 (Qwen2-based chat model).
-/// The model's recommended sampling: temperature=0.7, top_p=0.6, top_k=20, rep_penalty=1.05.
-fn build_prompt(selection: &str, context: Option<&str>) -> String {
-    // Inner content follows the official HY-MT1.5 prompt templates
-    let content = match context {
-        Some(ctx) if !ctx.is_empty() && ctx != selection => format!(
-            "{ctx}\n参考上面的信息，把下面的文本翻译成中文，注意不需要翻译上文，也不要额外解释：\n{selection}"
-        ),
-        _ => format!(
-            "将以下文本翻译为中文，注意只需要输出翻译后的结果，不要额外解释：\n{selection}"
-        ),
-    };
-
-    // ChatML format (Qwen2 tokenizer template). No BOS token; <|im_start|> is the boundary.
-    // We add <|im_start|>assistant\n to prompt the model to start generating the response.
-    format!("<|im_start|>user\n{content}<|im_end|>\n<|im_start|>assistant\n")
+/// Build the user message content following official HY-MT1.5 prompt templates.
+fn build_user_content(selection: &str) -> String {
+    // 中外互译模板 — no context, just translate the word/phrase directly.
+    // Context template causes the model to translate the full sentence, so we skip it.
+    format!(
+        "将以下文本翻译为中文，注意只需要输出翻译后的结果，不要额外解释：\n\n{selection}"
+    )
 }
 
 /// Run translation inference. Must be called from a blocking context.
 pub fn translate_sync(
     loaded: &LoadedModel,
     selection: &str,
-    context: Option<&str>,
+    _context: Option<&str>,
 ) -> Result<String, String> {
-    let prompt = build_prompt(selection, context);
+    let content = build_user_content(selection);
+
+    // Use the model's built-in chat template (Hunyuan tokens, not standard ChatML)
+    let tmpl = loaded.model.chat_template(None)
+        .map_err(|e| format!("chat_template: {e}"))?;
+    let msg = LlamaChatMessage::new("user".into(), content)
+        .map_err(|e| format!("chat msg: {e}"))?;
+    // add_ass=false per HY-MT README (add_generation_prompt=False)
+    let prompt = loaded.model.apply_chat_template(&tmpl, &[msg], false)
+        .map_err(|e| format!("apply_chat_template: {e}"))?;
 
     let ctx_params = LlamaContextParams::default()
         .with_n_ctx(Some(NonZeroU32::new(N_CTX).unwrap()));
@@ -166,7 +166,6 @@ pub fn translate_sync(
         .new_context(&loaded.backend, ctx_params)
         .map_err(|e| format!("context: {e}"))?;
 
-    // No BOS — ChatML starts with <|im_start|> which is already in the prompt string
     let tokens = loaded
         .model
         .str_to_token(&prompt, AddBos::Never)

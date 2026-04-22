@@ -47,8 +47,10 @@ export default function App() {
   };
 
   const handleWordClick = (token: WordToken, sentenceText: string) => {
-    if (token.text.match(/^\w+$/)) {
-      setClickedWord(token.text.toLowerCase());
+    // Strip leading/trailing punctuation so "booty." → "booty"
+    const cleaned = token.text.replace(/^[^\w]+|[^\w]+$/g, "");
+    if (cleaned.length > 0) {
+      setClickedWord(cleaned.toLowerCase());
       setClickedContext(sentenceText);
     }
   };
@@ -128,7 +130,10 @@ export default function App() {
       <div style={{ flex: 1, overflow: "auto", padding: view === "subtitle" ? "12px" : "0" }}>
         {view === "subtitle" && (
           <>
-            <SubtitleWindow onWordClick={handleWordClick} />
+            <SubtitleWindow onWordClick={handleWordClick} onPhraseSelect={(phrase, ctx) => {
+              setClickedWord(phrase.toLowerCase());
+              setClickedContext(ctx);
+            }} />
             {clickedWord && (
               <div style={{ marginTop: "12px" }}>
                 <WordDetail word={clickedWord} context={clickedContext} onClose={() => setClickedWord(null)} />
