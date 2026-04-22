@@ -9,12 +9,29 @@ if (window.__learnCaptionAttached) {
   // blockState: block element → array of sentence strings already sent
   const blockState = new WeakMap();
 
+  // Safely send a message; if the extension context is gone, tear everything down.
+  function safeSend(msg) {
+    try {
+      if (!chrome.runtime?.id) { teardown(); return; }
+      chrome.runtime.sendMessage(msg);
+    } catch (e) {
+      teardown();
+    }
+  }
+
+  function teardown() {
+    captionObserver.disconnect();
+    bodyObserver.disconnect();
+    isObserving = false;
+    stopReconnect();
+  }
+
   // action: "new_block" | "append" | "update"
   function sendCaption(text, speaker, avatar, action) {
     const trimmed = text.trim();
     if (!trimmed || trimmed.length < 4) return;
     console.log("[LearnCaption] send:", { action, speaker, text: trimmed });
-    chrome.runtime.sendMessage({ type: "caption", text: trimmed, speaker, avatar, action, platform: "meet" });
+    safeSend({ type: "caption", text: trimmed, speaker, avatar, action, platform: "meet" });
   }
 
   function getCaptionContainer() {
@@ -127,7 +144,7 @@ if (window.__learnCaptionAttached) {
   function startReconnect() {
     if (reconnectTimer) return;
     reconnectTimer = setInterval(() => {
-      chrome.runtime.sendMessage({ type: "ensure_connected" });
+      safeSend({ type: "ensure_connected" });
     }, 3000);
   }
 
