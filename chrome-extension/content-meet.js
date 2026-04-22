@@ -6,17 +6,17 @@ if (window.__learnCaptionAttached) {
 } else {
   window.__learnCaptionAttached = true;
 
-  // blockState: block element → last text seen in that block
-  // Using the block DOM element as key (WeakMap) is correct because:
-  //   - same speaker in a NEW block (after a pause) = new utterance → WeakMap sees new element → isNew:true
-  //   - same block updated by Meet = continuation → same element reference → isNew:false
+  // blockState: block element → array of sentence strings already sent
+  // Each text node in the caption div is a sentence.
+  // Only the last sentence can change (ASR revision); earlier ones are finalized.
   const blockState = new WeakMap();
 
-  function sendCaption(text, speaker, avatar, isNew) {
+  // action: "new_block" | "append" | "update"
+  function sendCaption(text, speaker, avatar, action) {
     const trimmed = text.trim();
     if (!trimmed || trimmed.length < 4) return;
-    console.log("[LearnCaption] send:", { isNew, speaker, text: trimmed });
-    chrome.runtime.sendMessage({ type: "caption", text: trimmed, speaker, avatar, isNew, platform: "meet" });
+    console.log("[LearnCaption] send:", { action, speaker, text: trimmed });
+    chrome.runtime.sendMessage({ type: "caption", text: trimmed, speaker, avatar, action, platform: "meet" });
   }
 
   function getCaptionContainer() {
@@ -53,23 +53,55 @@ if (window.__learnCaptionAttached) {
     return null;
   }
 
-  let debounceTimer = null;
+  // Extract sentences from caption div's child nodes (text nodes or elements)
+  function getSentences(captionDiv) {
+    const sentences = [];
+    for (const node of captionDiv.childNodes) {
+      const text = (node.textContent || "").replace(/\s+/g, " ").trim();
+      if (text) sentences.push(text);
+    }
+    console.log("[LearnCaption] sentences:", sentences, "childNodes:", captionDiv.childNodes.length);
+    return sentences;
+  }
 
   function processBlock(block) {
     const captionDiv = getCaptionDiv(block);
     if (!captionDiv) return;
-    const current = (captionDiv.textContent || "").replace(/\s+/g, " ").trim();
-    if (!current) return;
     const { name, avatar } = getSpeakerInfo(block);
+    const sentences = getSentences(captionDiv);
+    if (sentences.length === 0) return;
 
-    const stored = blockState.get(block);
-    if (current === stored) return;
+    const stored = blockState.get(block) || []; // array of sent sentence strings
+    const isNewBlock = stored.length === 0;
 
-    // Send full text every time — Meet's ASR may revise earlier words,
-    // so diffs are unreliable. The backend replaces the current line.
-    const isNew = (stored === undefined);
-    blockState.set(block, current);
-    sendCaption(current, name, avatar, isNew);
+    // Step 1: If previously-active sentence got finalized with changes, update it
+    if (stored.length > 0 && sentences.length > stored.length) {
+      const prevLastIdx = stored.length - 1;
+      if (sentences[prevLastIdx] !== stored[prevLastIdx]) {
+        sendCaption(sentences[prevLastIdx], name, avatar, "update");
+      }
+    }
+
+    // Step 2: Send newly appeared finalized sentences (not the last — it's still active)
+    for (let i = stored.length; i < sentences.length - 1; i++) {
+      sendCaption(sentences[i], name, avatar, isNewBlock && i === 0 ? "new_block" : "append");
+    }
+
+    // Step 3: Handle the active (last) sentence
+    const lastIdx = sentences.length - 1;
+    const lastSentence = sentences[lastIdx];
+
+    if (lastIdx < stored.length) {
+      // Same index as before — text revised by ASR
+      if (lastSentence !== stored[lastIdx]) {
+        sendCaption(lastSentence, name, avatar, "update");
+      }
+    } else {
+      // Brand new sentence
+      sendCaption(lastSentence, name, avatar, isNewBlock && lastIdx === 0 ? "new_block" : "append");
+    }
+
+    blockState.set(block, sentences.slice());
   }
 
   // On attach: scan all existing speaker blocks and set state as baseline
@@ -80,22 +112,18 @@ if (window.__learnCaptionAttached) {
       if (isSpeakerBlock(child)) {
         const captionDiv = getCaptionDiv(child);
         if (captionDiv) {
-          const current = (captionDiv.textContent || "").replace(/\s+/g, " ").trim();
-          if (current) blockState.set(child, current);
+          const sentences = getSentences(captionDiv);
+          if (sentences.length > 0) blockState.set(child, sentences);
         }
       }
     }
   }
 
-  // On each mutation: only process the active (last) speaker block
   function flushActive() {
-    clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => {
-      const container = getCaptionContainer();
-      if (!container) return;
-      const block = getActiveBlock(container);
-      if (block) processBlock(block);
-    }, 600);
+    const container = getCaptionContainer();
+    if (!container) return;
+    const block = getActiveBlock(container);
+    if (block) processBlock(block);
   }
 
   const observer = new MutationObserver(flushActive);

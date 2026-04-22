@@ -5,15 +5,20 @@ use tokio_tungstenite::{accept_async, tungstenite::Message};
 use serde::Deserialize;
 use tauri::Emitter;
 
-use super::{CaptionPipeline, RawCaption};
+use super::{CaptionAction, CaptionPipeline, RawCaption};
 
 pub const WS_PORT: u16 = 52340;
 
 #[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct ExtensionMessage {
     #[serde(rename = "type")]
     pub msg_type: String,
     pub text: Option<String>,
+    pub speaker: Option<String>,
+    pub avatar: Option<String>,
+    /// "new_block" | "append" | "update"
+    pub action: Option<String>,
     pub platform: Option<String>,
 }
 
@@ -30,10 +35,18 @@ fn now_ms() -> i64 {
 
 /// Bind the WebSocket port. Call this BEFORE creating any DB state
 /// so bind failures don't leave orphaned rows.
+/// Retries once after 200ms to handle the race where a just-aborted task
+/// hasn't released the port yet.
 pub async fn bind() -> Result<TcpListener, String> {
-    TcpListener::bind(format!("127.0.0.1:{WS_PORT}"))
-        .await
-        .map_err(|e| format!("WS server failed to bind on port {WS_PORT}: {e}"))
+    match TcpListener::bind(format!("127.0.0.1:{WS_PORT}")).await {
+        Ok(l) => Ok(l),
+        Err(_) => {
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            TcpListener::bind(format!("127.0.0.1:{WS_PORT}"))
+                .await
+                .map_err(|e| format!("WS server failed to bind on port {WS_PORT}: {e}"))
+        }
+    }
 }
 
 /// Accept connections from the already-bound listener.
@@ -63,8 +76,16 @@ pub async fn run(listener: TcpListener, pipeline: Arc<CaptionPipeline>) {
                         let _ = pipeline.app().emit("source-changed", platform);
                         last_platform = platform.to_string();
                     }
+                    let action = match msg.action.as_deref() {
+                        Some("new_block") => CaptionAction::NewBlock,
+                        Some("append") => CaptionAction::Append,
+                        Some("update") => CaptionAction::Update,
+                        _ => CaptionAction::NewBlock,
+                    };
                     pipeline.process(RawCaption {
                         text: caption_text,
+                        speaker: msg.speaker,
+                        action,
                         timestamp_ms: now_ms(),
                     });
                 }

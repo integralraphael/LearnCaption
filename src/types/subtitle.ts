@@ -14,4 +14,6 @@ export interface AnnotatedLine {
   tokens: WordToken[];
   rawText: string;
   timestampMs: number;
+  /** "new_block" | "append" | "update" */
+  action: string;
 }

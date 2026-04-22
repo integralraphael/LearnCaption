@@ -20,12 +20,16 @@ export function SubtitleWindow({ onWordClick }: Props) {
       if (!active) return;
       const incoming = e.payload;
       setLines((prev) => {
-        if (incoming.isNew || prev.length === 0) {
-          // New utterance — add a fresh line
-          return [...prev, incoming].slice(-MAX_LINES);
-        } else {
-          // Continuation — replace the last line with updated full text
-          return [...prev.slice(0, -1), incoming];
+        switch (incoming.action) {
+          case "update":
+            if (prev.length === 0) return [incoming];
+            // Replace the last line (ASR revision of same sentence)
+            return [...prev.slice(0, -1), incoming];
+          case "new_block":
+          case "append":
+          default:
+            // Add a new line
+            return [...prev, incoming].slice(-MAX_LINES);
         }
       });
     }).then((f) => { unlistenFn = f; });

@@ -2,7 +2,7 @@ use std::io::Read;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::caption_source::{CaptionPipeline, RawCaption};
+use crate::caption_source::{CaptionAction, CaptionPipeline, RawCaption};
 use crate::db::{load_vocab_entries, AppDb};
 use crate::dictionary::EcdictDictionary;
 use crate::pipeline::{
@@ -120,6 +120,8 @@ pub async fn start_recording(
                     for (text, offset_ms) in segments {
                         pipeline.process(RawCaption {
                             text,
+                            speaker: None,
+                            action: CaptionAction::NewBlock,
                             timestamp_ms: session_start_ms + offset_ms,
                         });
                     }

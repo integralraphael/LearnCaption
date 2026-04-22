@@ -23,6 +23,8 @@ pub struct AnnotatedLine {
     pub tokens: Vec<WordToken>,
     pub raw_text: String,
     pub timestamp_ms: i64,
+    /// "new_block" | "append" | "update"
+    pub action: String,
 }
 
 /// A single entry from the vocabulary table used to build the automaton.
@@ -77,6 +79,7 @@ impl Annotator {
         line_id: i64,
         meeting_id: i64,
         timestamp_ms: i64,
+        action: &str,
     ) -> AnnotatedLine {
         let lower = raw_text.to_lowercase();
         let mut vocab_matches: Vec<(usize, usize, usize)> = vec![];
@@ -92,6 +95,7 @@ impl Annotator {
             tokens,
             raw_text: raw_text.to_string(),
             timestamp_ms,
+            action: action.to_string(),
         }
     }
 
@@ -192,7 +196,7 @@ mod tests {
     #[test]
     fn test_annotates_single_vocab_word() {
         let a = make_annotator_with_vocab(vec![vocab(1, "leverage", "充分利用", 3)]);
-        let line = a.annotate("we should leverage this", 1, 1, 0);
+        let line = a.annotate("we should leverage this", 1, 1, 0, true);
         let tok = line.tokens.iter().find(|t| t.text == "leverage").unwrap();
         assert_eq!(tok.definition.as_deref(), Some("充分利用"));
         assert_eq!(tok.color.as_deref(), Some("orange")); // count=3 → orange
@@ -204,7 +208,7 @@ mod tests {
             vocab(1, "look forward to", "期待", 1),
             vocab(2, "forward", "向前", 0),
         ]);
-        let line = a.annotate("I look forward to the meeting", 1, 1, 0);
+        let line = a.annotate("I look forward to the meeting", 1, 1, 0, true);
         // The phrase "look forward to" should be a single token
         assert!(
             line.tokens.iter().any(|t| t.text == "look forward to"),
@@ -224,7 +228,7 @@ mod tests {
             vocab(2, "beta",  "乙", 3),   // orange
             vocab(3, "gamma", "丙", 7),   // red
         ]);
-        let line = a.annotate("alpha beta gamma", 1, 1, 0);
+        let line = a.annotate("alpha beta gamma", 1, 1, 0, true);
         let colors: Vec<_> = line.tokens.iter().map(|t| t.color.as_deref()).collect();
         assert_eq!(colors, vec![Some("yellow"), Some("orange"), Some("red")]);
     }
@@ -232,7 +236,7 @@ mod tests {
     #[test]
     fn test_unannotated_word_has_no_vocab_id() {
         let a = make_annotator_with_vocab(vec![]);
-        let line = a.annotate("hello world", 1, 1, 0);
+        let line = a.annotate("hello world", 1, 1, 0, true);
         for tok in &line.tokens {
             assert!(tok.vocab_id.is_none());
         }
@@ -257,6 +261,7 @@ mod tests {
             tokens: vec![],
             raw_text: "hi".to_string(),
             timestamp_ms: 0,
+            action: "new_block".to_string(),
         };
         let json = serde_json::to_string(&line).unwrap();
         assert!(json.contains("\"lineId\""), "expected camelCase 'lineId'");

@@ -6,10 +6,20 @@ use tauri::{AppHandle, Emitter};
 use crate::db::AppDb;
 use crate::pipeline::Annotator;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CaptionAction {
+    /// New speaker block / new utterance after a gap
+    NewBlock,
+    /// New finalized sentence within the same block
+    Append,
+    /// ASR revision of the current (last) sentence
+    Update,
+}
+
 pub struct RawCaption {
     pub text: String,
     pub speaker: Option<String>,
-    pub is_new: bool,
+    pub action: CaptionAction,
     pub timestamp_ms: i64,
 }
 
@@ -20,7 +30,7 @@ pub struct CaptionPipeline {
     db: AppDb,
     meeting_id: Arc<Mutex<Option<i64>>>,
     app: AppHandle,
-    /// Track the last inserted line_id so continuations can UPDATE it.
+    /// Track the last inserted line_id so Update can overwrite it.
     last_line_id: Mutex<Option<i64>>,
 }
 
@@ -48,55 +58,66 @@ impl CaptionPipeline {
             None => return,
         };
 
-        let line_id: i64 = if raw.is_new {
-            // New utterance — INSERT a fresh row
-            let conn = self.db.lock().unwrap();
-            if let Err(e) = conn.execute(
-                "INSERT INTO transcript_lines (meeting_id, text, timestamp_ms, speaker_label) \
-                 VALUES (?1, ?2, ?3, ?4)",
-                rusqlite::params![meeting_id, &raw.text, raw.timestamp_ms, raw.speaker],
-            ) {
-                let _ = self.app.emit("pipeline-error", format!("transcript insert: {e}"));
-                return;
+        let action_str = match raw.action {
+            CaptionAction::NewBlock => "new_block",
+            CaptionAction::Append => "append",
+            CaptionAction::Update => "update",
+        };
+
+        let line_id: i64 = match raw.action {
+            CaptionAction::NewBlock | CaptionAction::Append => {
+                // INSERT a new row
+                let conn = self.db.lock().unwrap();
+                if let Err(e) = conn.execute(
+                    "INSERT INTO transcript_lines (meeting_id, text, timestamp_ms, speaker_label) \
+                     VALUES (?1, ?2, ?3, ?4)",
+                    rusqlite::params![meeting_id, &raw.text, raw.timestamp_ms, raw.speaker],
+                ) {
+                    let _ = self.app.emit("pipeline-error", format!("transcript insert: {e}"));
+                    return;
+                }
+                let id = conn.last_insert_rowid();
+                *self.last_line_id.lock().unwrap() = Some(id);
+                id
             }
-            let id = conn.last_insert_rowid();
-            *self.last_line_id.lock().unwrap() = Some(id);
-            id
-        } else if let Some(existing_id) = *self.last_line_id.lock().unwrap() {
-            // Continuation — UPDATE the existing row with full revised text
-            let conn = self.db.lock().unwrap();
-            if let Err(e) = conn.execute(
-                "UPDATE transcript_lines SET text = ?1, timestamp_ms = ?2 WHERE id = ?3",
-                rusqlite::params![&raw.text, raw.timestamp_ms, existing_id],
-            ) {
-                let _ = self.app.emit("pipeline-error", format!("transcript update: {e}"));
-                return;
+            CaptionAction::Update => {
+                let existing_id = *self.last_line_id.lock().unwrap();
+                if let Some(existing_id) = existing_id {
+                    let conn = self.db.lock().unwrap();
+                    if let Err(e) = conn.execute(
+                        "UPDATE transcript_lines SET text = ?1, timestamp_ms = ?2 WHERE id = ?3",
+                        rusqlite::params![&raw.text, raw.timestamp_ms, existing_id],
+                    ) {
+                        let _ = self.app.emit("pipeline-error", format!("transcript update: {e}"));
+                        return;
+                    }
+                    existing_id
+                } else {
+                    // No previous line — fall back to INSERT
+                    let conn = self.db.lock().unwrap();
+                    if let Err(e) = conn.execute(
+                        "INSERT INTO transcript_lines (meeting_id, text, timestamp_ms, speaker_label) \
+                         VALUES (?1, ?2, ?3, ?4)",
+                        rusqlite::params![meeting_id, &raw.text, raw.timestamp_ms, raw.speaker],
+                    ) {
+                        let _ = self.app.emit("pipeline-error", format!("transcript insert: {e}"));
+                        return;
+                    }
+                    let id = conn.last_insert_rowid();
+                    *self.last_line_id.lock().unwrap() = Some(id);
+                    id
+                }
             }
-            existing_id
-        } else {
-            // No previous line to continue — treat as new
-            let conn = self.db.lock().unwrap();
-            if let Err(e) = conn.execute(
-                "INSERT INTO transcript_lines (meeting_id, text, timestamp_ms, speaker_label) \
-                 VALUES (?1, ?2, ?3, ?4)",
-                rusqlite::params![meeting_id, &raw.text, raw.timestamp_ms, raw.speaker],
-            ) {
-                let _ = self.app.emit("pipeline-error", format!("transcript insert: {e}"));
-                return;
-            }
-            let id = conn.last_insert_rowid();
-            *self.last_line_id.lock().unwrap() = Some(id);
-            id
         };
 
         let line = {
             let ann = self.annotator.lock().unwrap();
-            ann.annotate(&raw.text, line_id, meeting_id, raw.timestamp_ms, raw.is_new)
+            ann.annotate(&raw.text, line_id, meeting_id, raw.timestamp_ms, action_str)
         };
 
-        // Only count vocab occurrences for new utterances.
-        // Continuations send full revised text, so re-counting would inflate stats.
-        if raw.is_new {
+        // Only count vocab on new content (NewBlock / Append).
+        // Update is ASR revision of the same sentence — skip to avoid inflated counts.
+        if raw.action != CaptionAction::Update {
             let conn = self.db.lock().unwrap();
             for token in &line.tokens {
                 if let Some(vocab_id) = token.vocab_id {
@@ -133,15 +154,14 @@ mod tests {
 
     #[test]
     fn test_raw_caption_fields() {
-        let cap = RawCaption { text: "hello world".to_string(), speaker: None, is_new: true, timestamp_ms: 5000 };
+        let cap = RawCaption { text: "hello world".to_string(), speaker: None, action: CaptionAction::NewBlock, timestamp_ms: 5000 };
         assert_eq!(cap.text, "hello world");
         assert_eq!(cap.timestamp_ms, 5000);
     }
 
     #[test]
     fn test_raw_caption_empty_text() {
-        // Empty text should be caught by process() guard
-        let cap = RawCaption { text: "  ".to_string(), speaker: None, is_new: true, timestamp_ms: 0 };
+        let cap = RawCaption { text: "  ".to_string(), speaker: None, action: CaptionAction::NewBlock, timestamp_ms: 0 };
         assert!(cap.text.trim().is_empty());
     }
 }

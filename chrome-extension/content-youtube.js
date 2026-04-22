@@ -4,13 +4,14 @@ let lastSentText = "";
 let lastSentTime = 0;
 const SESSION_GAP_MS = 3000; // 3 seconds gap means a new utterance
 
-function sendCaption(text, isNew) {
+// action: "new_block" | "update"
+function sendCaption(text, action) {
   const trimmed = text.trim();
   if (!trimmed || trimmed.length < 2) return;
   chrome.runtime.sendMessage({
     type: "caption",
     text: trimmed,
-    isNew,
+    action,
     platform: "youtube"
   });
 }
@@ -31,11 +32,8 @@ function flush() {
   const now = Date.now();
   const timeSinceLast = now - lastSentTime;
 
-  // Send full text every time — backend replaces the current line.
-  // A long gap means a new utterance.
-  const isNew = !lastSentText || timeSinceLast > SESSION_GAP_MS;
-
-  sendCaption(current, isNew);
+  const action = (!lastSentText || timeSinceLast > SESSION_GAP_MS) ? "new_block" : "update";
+  sendCaption(current, action);
   lastSentText = current;
   lastSentTime = now;
 }
