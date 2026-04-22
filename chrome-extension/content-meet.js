@@ -1,14 +1,12 @@
 // content-meet.js — Google Meet caption observer
 
-// Guard: only one observer instance per page
+// Guard: only one observer instance per page load
 if (window.__learnCaptionAttached) {
   // Already running — do nothing
 } else {
   window.__learnCaptionAttached = true;
 
   // blockState: block element → array of sentence strings already sent
-  // Each text node in the caption div is a sentence.
-  // Only the last sentence can change (ASR revision); earlier ones are finalized.
   const blockState = new WeakMap();
 
   // action: "new_block" | "append" | "update"
@@ -44,7 +42,6 @@ if (window.__learnCaptionAttached) {
     return divKids.length >= 1 ? divKids[divKids.length - 1] : null;
   }
 
-  // Find the last speaker block (active one — last 2 divs in container are UI elements)
   function getActiveBlock(container) {
     const children = Array.from(container.children);
     for (let i = children.length - 1; i >= 0; i--) {
@@ -53,7 +50,6 @@ if (window.__learnCaptionAttached) {
     return null;
   }
 
-  // Extract sentences from caption div's child nodes (text nodes or elements)
   function getSentences(captionDiv) {
     const sentences = [];
     for (const node of captionDiv.childNodes) {
@@ -71,10 +67,10 @@ if (window.__learnCaptionAttached) {
     const sentences = getSentences(captionDiv);
     if (sentences.length === 0) return;
 
-    const stored = blockState.get(block) || []; // array of sent sentence strings
+    const stored = blockState.get(block) || [];
     const isNewBlock = stored.length === 0;
 
-    // Step 1: If previously-active sentence got finalized with changes, update it
+    // Step 1: finalized version of previously-active sentence
     if (stored.length > 0 && sentences.length > stored.length) {
       const prevLastIdx = stored.length - 1;
       if (sentences[prevLastIdx] !== stored[prevLastIdx]) {
@@ -82,30 +78,25 @@ if (window.__learnCaptionAttached) {
       }
     }
 
-    // Step 2: Send newly appeared finalized sentences (not the last — it's still active)
+    // Step 2: newly finalized sentences (all except the last)
     for (let i = stored.length; i < sentences.length - 1; i++) {
       sendCaption(sentences[i], name, avatar, isNewBlock && i === 0 ? "new_block" : "append");
     }
 
-    // Step 3: Handle the active (last) sentence
+    // Step 3: active (last) sentence
     const lastIdx = sentences.length - 1;
     const lastSentence = sentences[lastIdx];
-
     if (lastIdx < stored.length) {
-      // Same index as before — text revised by ASR
       if (lastSentence !== stored[lastIdx]) {
         sendCaption(lastSentence, name, avatar, "update");
       }
     } else {
-      // Brand new sentence
       sendCaption(lastSentence, name, avatar, isNewBlock && lastIdx === 0 ? "new_block" : "append");
     }
 
     blockState.set(block, sentences.slice());
   }
 
-  // On attach: scan all existing speaker blocks and set state as baseline
-  // without sending them (avoids flooding the UI with old history).
   function initialFlush(container) {
     const children = Array.from(container.children);
     for (const child of children) {
@@ -126,18 +117,56 @@ if (window.__learnCaptionAttached) {
     if (block) processBlock(block);
   }
 
-  const observer = new MutationObserver(flushActive);
+  // Inner observer: watches caption content mutations
+  const captionObserver = new MutationObserver(flushActive);
+  let isObserving = false;
 
-  function attachObserver() {
-    const container = getCaptionContainer();
-    if (container) {
-      observer.observe(container, { childList: true, subtree: true, characterData: true });
-      console.log("[LearnCaption] Observing Meet captions");
-      initialFlush(container);
-    } else {
-      setTimeout(attachObserver, 1000);
-    }
+  // Reconnect polling: only runs while CC is active
+  let reconnectTimer = null;
+
+  function startReconnect() {
+    if (reconnectTimer) return;
+    reconnectTimer = setInterval(() => {
+      chrome.runtime.sendMessage({ type: "ensure_connected" });
+    }, 3000);
   }
 
-  attachObserver();
+  function stopReconnect() {
+    clearInterval(reconnectTimer);
+    reconnectTimer = null;
+  }
+
+  function onCCEnabled(container) {
+    if (isObserving) return;
+    captionObserver.observe(container, { childList: true, subtree: true, characterData: true });
+    isObserving = true;
+    console.log("[LearnCaption] CC enabled — observing captions");
+    initialFlush(container);
+    startReconnect();
+  }
+
+  function onCCDisabled() {
+    if (!isObserving) return;
+    captionObserver.disconnect();
+    isObserving = false;
+    stopReconnect();
+    console.log("[LearnCaption] CC disabled — observer disconnected");
+  }
+
+  // Outer observer: watches for the caption container appearing/disappearing
+  // Handles CC toggle (on/off) without needing a page reload
+  const bodyObserver = new MutationObserver(() => {
+    const container = getCaptionContainer();
+    if (container && !isObserving) {
+      onCCEnabled(container);
+    } else if (!container && isObserving) {
+      onCCDisabled();
+    }
+  });
+
+  bodyObserver.observe(document.body, { childList: true, subtree: true });
+
+  // Initial check in case CC is already on when the script loads
+  const initialContainer = getCaptionContainer();
+  if (initialContainer) onCCEnabled(initialContainer);
 }

@@ -26,7 +26,27 @@ function connect() {
   };
 }
 
+async function checkAndConnect() {
+  if (ws && ws.readyState !== WebSocket.CLOSED) return; // already connected
+  try {
+    const res = await fetch("http://127.0.0.1:52341/status");
+    const { capturing } = await res.json();
+    if (capturing) {
+      console.log("[LearnCaption] app is capturing — connecting WS");
+      connect();
+    }
+  } catch {
+    // App not running or HTTP server not up yet — silent
+  }
+}
+
 chrome.runtime.onMessage.addListener((message) => {
+  // CC is active — check /status and connect WS if app is capturing
+  if (message.type === "ensure_connected") {
+    checkAndConnect();
+    return;
+  }
+
   if (message.type !== "caption") return;
   const json = JSON.stringify(message);
   if (ws?.readyState === WebSocket.OPEN) {
