@@ -15,12 +15,8 @@ if (window.__learnCaptionAttached) {
       if (!chrome.runtime?.id) { teardown(); return; }
       // Pass a no-op callback so Chrome routes errors through lastError
       // instead of reporting them as uncaught console errors.
-      chrome.runtime.sendMessage(msg, () => {
-        if (chrome.runtime.lastError) {
-          // Context invalidated or background not reachable — stop everything.
-          teardown();
-        }
-      });
+      // Do NOT teardown here — lastError can also mean "port closed" (normal).
+      chrome.runtime.sendMessage(msg, () => { void chrome.runtime.lastError; });
     } catch (e) {
       teardown();
     }
