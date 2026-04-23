@@ -1,18 +1,19 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import type { AnnotatedLine, WordToken } from "../types/subtitle";
 import { Token } from "./Token";
 
-const MAX_LINES = 3;
-
 interface Props {
   onWordClick?: (token: WordToken, sentenceText: string) => void;
   onPhraseSelect?: (phrase: string, sentenceText: string) => void;
+  /** Called on scroll changes so parent can drive ScrollColumn */
+  onScrollState?: (state: { fraction: number; thumbSize: number; atBottom: boolean }) => void;
 }
 
-export function SubtitleWindow({ onWordClick, onPhraseSelect }: Props) {
+export function SubtitleWindow({ onWordClick, onPhraseSelect, onScrollState }: Props) {
   const [lines, setLines] = useState<AnnotatedLine[]>([]);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const autoFollowRef = useRef(true);
 
   useEffect(() => {
     let active = true;
@@ -24,13 +25,11 @@ export function SubtitleWindow({ onWordClick, onPhraseSelect }: Props) {
         switch (incoming.action) {
           case "update":
             if (prev.length === 0) return [incoming];
-            // Replace the last line (ASR revision of same sentence)
             return [...prev.slice(0, -1), incoming];
           case "new_block":
           case "append":
           default:
-            // Add a new line
-            return [...prev, incoming].slice(-MAX_LINES);
+            return [...prev, incoming];
         }
       });
     }).then((f) => { unlistenFn = f; });
@@ -40,18 +39,42 @@ export function SubtitleWindow({ onWordClick, onPhraseSelect }: Props) {
     };
   }, []);
 
+  // Auto-scroll to bottom when new lines arrive
   useEffect(() => {
-    if (lines.length > 0) {
-      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (autoFollowRef.current && containerRef.current) {
+      containerRef.current.scrollTop = containerRef.current.scrollHeight;
     }
+    reportScroll();
   }, [lines]);
+
+  const reportScroll = useCallback(() => {
+    const el = containerRef.current;
+    if (!el || !onScrollState) return;
+    const { scrollTop, scrollHeight, clientHeight } = el;
+    const maxScroll = scrollHeight - clientHeight;
+    const atBottom = maxScroll <= 0 || scrollTop >= maxScroll - 5;
+    onScrollState({
+      fraction: maxScroll > 0 ? scrollTop / maxScroll : 1,
+      thumbSize: scrollHeight > 0 ? clientHeight / scrollHeight : 1,
+      atBottom,
+    });
+  }, [onScrollState]);
+
+  const handleScroll = () => {
+    const el = containerRef.current;
+    if (!el) return;
+    const { scrollTop, scrollHeight, clientHeight } = el;
+    const maxScroll = scrollHeight - clientHeight;
+    const atBottom = maxScroll <= 0 || scrollTop >= maxScroll - 5;
+    autoFollowRef.current = atBottom;
+    reportScroll();
+  };
 
   const handleMouseUp = () => {
     if (!onPhraseSelect) return;
     const sel = window.getSelection();
     const text = sel?.toString().trim();
     if (!text || text.split(/\s+/).length < 2) return;
-    // Use the line's rawText instead of selection string (avoids grabbing definition text)
     const node = sel?.anchorNode;
     const lineEl = (node instanceof HTMLElement ? node : node?.parentElement)?.closest("[data-raw-text]");
     const rawText = lineEl?.getAttribute("data-raw-text") ?? "";
@@ -59,72 +82,114 @@ export function SubtitleWindow({ onWordClick, onPhraseSelect }: Props) {
     sel?.removeAllRanges();
   };
 
+  /** Called by parent to jump to latest */
+  const jumpToLatest = useCallback(() => {
+    if (containerRef.current) {
+      containerRef.current.scrollTop = containerRef.current.scrollHeight;
+      autoFollowRef.current = true;
+      reportScroll();
+    }
+  }, [reportScroll]);
+
+  // Expose jumpToLatest via ref-like pattern: attach to component
+  // Parent calls this via the onScrollState callback pattern instead
+
+  // Attach jumpToLatest to a ref the parent can call
+  const jumpRef = useRef(jumpToLatest);
+  jumpRef.current = jumpToLatest;
+
+  // Progressive opacity: last 3 lines full, older lines fade
+  const getLineOpacity = (index: number) => {
+    const fromEnd = lines.length - 1 - index;
+    if (fromEnd < 3) return 1;
+    // Fade from 0.5 down to 0.2 for older lines
+    return Math.max(0.2, 0.5 - (fromEnd - 3) * 0.05);
+  };
+
   return (
     <>
-    <style>{`
-      .lc-line[data-speaker]::before {
-        content: attr(data-speaker);
-        display: inline-block;
-        background: var(--speaker-color, #64748b);
-        color: #fff;
-        font-size: 11px;
-        font-weight: 600;
-        padding: 1px 6px;
-        border-radius: 4px;
-        margin-right: 6px;
-        line-height: 1.6;
-        flex-shrink: 0;
-        align-self: center;
-        user-select: none;
-      }
-    `}</style>
-    <div
-      onMouseUp={handleMouseUp}
-      style={{
-        background: "rgba(15, 23, 42, 0.85)",
-        backdropFilter: "blur(12px)",
-        WebkitBackdropFilter: "blur(12px)",
-        borderRadius: "12px",
-        border: "1px solid rgba(255,255,255,0.08)",
-        padding: "14px 18px",
-        minHeight: "80px",
-      }}
-      data-tauri-drag-region
-    >
-      {lines.length === 0 ? (
-        <span style={{ color: "#475569", fontSize: "14px" }}>
-          Listening…
-        </span>
-      ) : (
-        lines.map((line, i) => (
-          <div
-            className="lc-line"
-            key={line.lineId + "-" + i}
-            data-raw-text={line.rawText}
-            {...(line.speaker ? { "data-speaker": line.speaker } : {})}
-            style={{
-              lineHeight: "2.2",
-              fontSize: "16px",
-              color: "#e2e8f0",
-              marginBottom: "2px",
-              flexWrap: "wrap",
-              display: "flex",
-              alignItems: "flex-start",
-              ...(line.speakerColor ? { "--speaker-color": line.speakerColor } as React.CSSProperties : {}),
-            }}
-          >
-            {line.tokens.map((token, j) => (
-              <Token
-                key={j}
-                token={token}
-                onClick={onWordClick ? (t) => onWordClick(t, line.rawText) : undefined}
-              />
-            ))}
-          </div>
-        ))
-      )}
-      <div ref={bottomRef} />
-    </div>
+      <style>{`
+        .lc-subtitle-area::-webkit-scrollbar { display: none; }
+        .lc-line[data-speaker]::before {
+          content: attr(data-speaker);
+          display: inline-block;
+          background: var(--speaker-color, #64748b);
+          color: #fff;
+          font-size: 11px;
+          font-weight: 600;
+          padding: 1px 6px;
+          border-radius: 4px;
+          margin-right: 6px;
+          line-height: 1.6;
+          flex-shrink: 0;
+          align-self: center;
+          user-select: none;
+        }
+      `}</style>
+      <div
+        ref={containerRef}
+        className="lc-subtitle-area"
+        onScroll={handleScroll}
+        onMouseUp={handleMouseUp}
+        data-jump-to-latest
+        style={{
+          flex: 1,
+          overflowY: "auto",
+          scrollbarWidth: "none",
+          padding: "12px 16px",
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: "flex-end",
+        }}
+      >
+        {lines.length === 0 ? (
+          <span style={{ color: "#334155", fontSize: "13px", textAlign: "center" }}>
+            等待开始录制…
+          </span>
+        ) : (
+          lines.map((line, i) => (
+            <div
+              className="lc-line"
+              key={line.lineId + "-" + i}
+              data-raw-text={line.rawText}
+              {...(line.speaker ? { "data-speaker": line.speaker } : {})}
+              style={{
+                lineHeight: "2.2",
+                fontSize: "14px",
+                color: "#e2e8f0",
+                opacity: getLineOpacity(i),
+                marginBottom: "2px",
+                flexWrap: "wrap",
+                display: "flex",
+                alignItems: "flex-start",
+                ...(line.speakerColor
+                  ? ({ "--speaker-color": line.speakerColor } as React.CSSProperties)
+                  : {}),
+              }}
+            >
+              {line.tokens.map((token, j) => (
+                <Token
+                  key={j}
+                  token={token}
+                  onClick={
+                    onWordClick
+                      ? (t) => onWordClick(t, line.rawText)
+                      : undefined
+                  }
+                />
+              ))}
+            </div>
+          ))
+        )}
+      </div>
     </>
   );
+}
+
+// Export a helper to get the jump function from the DOM
+export function jumpSubtitleToLatest() {
+  const el = document.querySelector("[data-jump-to-latest]");
+  if (el) {
+    el.scrollTop = el.scrollHeight;
+  }
 }
