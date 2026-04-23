@@ -1,34 +1,44 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useState } from "react";
 import type { WordToken } from "./types/subtitle";
-import { SubtitleWindow } from "./components/SubtitleWindow";
-import { VocabBook } from "./components/VocabBook";
-import { ReviewPage } from "./components/ReviewPage";
+import { Sidebar } from "./components/Sidebar";
+import { SubtitleWindow, jumpSubtitleToLatest } from "./components/SubtitleWindow";
+import { ScrollColumn } from "./components/ScrollColumn";
 import { WordDetail } from "./components/WordDetail";
-import { SourceBadge } from "./components/SourceBadge";
 import { VocabCalibration } from "./components/VocabCalibration";
 
-type View = "subtitle" | "vocab" | "review";
 type CaptureMode = "none" | "whisper" | "browser";
 
 export default function App() {
   const [modelReady, setModelReady] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
-  const [calibrated, setCalibrated] = useState<boolean | null>(null); // null = loading
+  const [calibrated, setCalibrated] = useState<boolean | null>(null);
   const [captureMode, setCaptureMode] = useState<CaptureMode>("none");
-  const [view, setView] = useState<View>("subtitle");
+
+  // Word detail
   const [clickedWord, setClickedWord] = useState<string | null>(null);
-  const [clickedContext, setClickedContext] = useState<string>("");
+  const [clickedContext, setClickedContext] = useState("");
   const [clickedIsPhrase, setClickedIsPhrase] = useState(false);
+
+  // Scroll state for ScrollColumn
+  const [scrollState, setScrollState] = useState({
+    fraction: 1,
+    thumbSize: 1,
+    atBottom: true,
+  });
+
+  // Window height for adaptive word detail
+  const [windowHeight, setWindowHeight] = useState(window.innerHeight);
 
   useEffect(() => {
     invoke<boolean>("check_model").then(setModelReady);
     invoke<string | null>("get_setting", { key: "vocab_calibrated" }).then((v) =>
       setCalibrated(v === "true")
     );
-    const u1 = listen<number>("model-download-progress", (e) => setDownloadProgress(e.payload));
+    const u1 = listen<number>("model-download-progress", (e) =>
+      setDownloadProgress(e.payload)
+    );
     const u2 = listen("model-download-done", () => setModelReady(true));
     return () => {
       u1.then((f) => f());
@@ -36,14 +46,25 @@ export default function App() {
     };
   }, []);
 
-  const handleStartWhisper = async () => {
-    await invoke("start_recording");
-    setCaptureMode("whisper");
+  useEffect(() => {
+    const onResize = () => setWindowHeight(window.innerHeight);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  const handleStart = async (source: "whisper" | "browser") => {
+    if (source === "whisper") {
+      await invoke("start_recording");
+      setCaptureMode("whisper");
+    } else {
+      await invoke("start_browser_capture");
+      setCaptureMode("browser");
+    }
   };
 
-  const handleStartBrowser = async () => {
-    await invoke("start_browser_capture");
-    setCaptureMode("browser");
+  const handlePause = async () => {
+    // For now, pause = stop (true pause can be added later)
+    await handleStop();
   };
 
   const handleStop = async () => {
@@ -53,7 +74,6 @@ export default function App() {
   };
 
   const handleWordClick = (token: WordToken, sentenceText: string) => {
-    // Strip leading/trailing punctuation so "booty." → "booty"
     const cleaned = token.text.replace(/^[^\w]+|[^\w]+$/g, "");
     if (cleaned.length > 0) {
       setClickedWord(cleaned.toLowerCase());
@@ -62,18 +82,42 @@ export default function App() {
     }
   };
 
-  // ── Vocab calibration screen ──
+  const handlePhraseSelect = (phrase: string, ctx: string) => {
+    setClickedWord(phrase.toLowerCase());
+    setClickedContext(ctx);
+    setClickedIsPhrase(true);
+  };
+
+  const useBottomPanel = windowHeight >= 250;
+
+  // ── Vocab calibration ──
   if (modelReady && calibrated === false) {
-    return <VocabCalibration onComplete={() => setCalibrated(true)} />;
+    return (
+      <div style={styles.root}>
+        <Sidebar
+          captureMode="none"
+          onStart={() => {}}
+          onPause={() => {}}
+          onStop={() => {}}
+          onRecalibrate={() => {}}
+        />
+        <div style={{ flex: 1, overflow: "auto" }}>
+          <VocabCalibration onComplete={() => setCalibrated(true)} />
+        </div>
+        <div style={{ width: "32px", borderLeft: "1px solid rgba(255,255,255,0.04)", flexShrink: 0 }} />
+      </div>
+    );
   }
 
-  // ── Model download screen ──
+  // ── Model download ──
   if (!modelReady) {
     return (
-      <div style={styles.screen}>
+      <div style={{ ...styles.root, alignItems: "center", justifyContent: "center" }}>
         <div style={{ textAlign: "center", maxWidth: "360px" }}>
-          <h1 style={{ color: "#e2e8f0", fontSize: "24px", marginBottom: "8px" }}>LearnCaption</h1>
-          <p style={{ color: "#94a3b8", marginBottom: "24px" }}>
+          <h1 style={{ color: "#e2e8f0", fontSize: "20px", marginBottom: "8px" }}>
+            LearnCaption
+          </h1>
+          <p style={{ color: "#94a3b8", marginBottom: "24px", fontSize: "13px" }}>
             Downloading Whisper model (~500 MB) on first launch.
           </p>
           {downloadProgress > 0 ? (
@@ -81,10 +125,15 @@ export default function App() {
               <div style={{ background: "#1e293b", borderRadius: "6px", height: "6px", width: "100%", marginBottom: "8px" }}>
                 <div style={{ background: "#60a5fa", height: "6px", borderRadius: "6px", width: `${downloadProgress * 100}%`, transition: "width 0.3s" }} />
               </div>
-              <p style={{ color: "#94a3b8", fontSize: "13px" }}>{Math.round(downloadProgress * 100)}%</p>
+              <p style={{ color: "#94a3b8", fontSize: "13px" }}>
+                {Math.round(downloadProgress * 100)}%
+              </p>
             </>
           ) : (
-            <button onClick={() => invoke("start_model_download")} style={styles.primaryBtn}>
+            <button
+              onClick={() => invoke("start_model_download")}
+              style={styles.primaryBtn}
+            >
               Download Model
             </button>
           )}
@@ -93,115 +142,59 @@ export default function App() {
     );
   }
 
+  // ── Main HUD ──
   return (
-    <div style={{ ...styles.screen, flexDirection: "column", padding: 0 }}>
-      {/* Navigation */}
-      <div style={styles.nav} data-tauri-drag-region>
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          {/* Window controls */}
-          <div style={{ display: "flex", gap: "6px", marginRight: "4px" }} data-tauri-drag-region="false">
-            <span onClick={() => getCurrentWindow().close()}    style={styles.winBtn("#ef4444")} title="关闭" />
-            <span onClick={() => getCurrentWindow().minimize()} style={styles.winBtn("#f59e0b")} title="最小化" />
-            <span onClick={() => getCurrentWindow().toggleMaximize()} style={styles.winBtn("#22c55e")} title="最大化" />
+    <div style={styles.root}>
+      <Sidebar
+        captureMode={captureMode}
+        onStart={handleStart}
+        onPause={handlePause}
+        onStop={handleStop}
+        onRecalibrate={() => setCalibrated(false)}
+      />
+
+      {/* Main content area */}
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+        <SubtitleWindow
+          onWordClick={handleWordClick}
+          onPhraseSelect={handlePhraseSelect}
+          onScrollState={setScrollState}
+        />
+
+        {/* Bottom word detail panel (when window is tall enough) */}
+        {clickedWord && useBottomPanel && (
+          <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", padding: "0 16px" }}>
+            <WordDetail
+              word={clickedWord}
+              context={clickedContext}
+              isPhrase={clickedIsPhrase}
+              onClose={() => setClickedWord(null)}
+            />
           </div>
-          <span style={{ color: "#60a5fa", fontWeight: 700, fontSize: "14px" }}>LearnCaption</span>
-          <SourceBadge />
-          <span
-            onClick={() => setCalibrated(false)}
-            title="重新校准词汇量"
-            style={{ color: "#475569", fontSize: "12px", cursor: "pointer", marginLeft: "2px" }}
-          >
-            Lv
-          </span>
-        </div>
-        <div style={{ display: "flex", gap: "4px" }}>
-          {(["subtitle", "vocab", "review"] as View[]).map((v) => (
-            <button
-              key={v}
-              onClick={() => setView(v)}
-              style={{ ...styles.navBtn, background: view === v ? "#1e3a5f" : "transparent", color: view === v ? "#60a5fa" : "#64748b" }}
-            >
-              {{ subtitle: "Subtitles", vocab: "Vocab", review: "Review" }[v]}
-            </button>
-          ))}
-        </div>
-        {captureMode === "none" ? (
-          <div style={{ display: "flex", gap: "6px" }}>
-            <button onClick={handleStartWhisper} style={styles.primaryBtn}>⏺ Whisper</button>
-            <button
-              onClick={handleStartBrowser}
-              style={{ ...styles.primaryBtn, background: "#064e3b", color: "#34d399" }}
-            >
-              🌐 Browser
-            </button>
-          </div>
-        ) : (
-          <button
-            onClick={handleStop}
-            style={{ ...styles.primaryBtn, background: "#7f1d1d", color: "#fca5a5" }}
-          >
-            ⏹ Stop
-          </button>
         )}
       </div>
 
-      {/* Content */}
-      <div style={{ flex: 1, overflow: "auto", padding: view === "subtitle" ? "12px" : "0" }}>
-        {view === "subtitle" && (
-          <>
-            <SubtitleWindow onWordClick={handleWordClick} onPhraseSelect={(phrase, ctx) => {
-              setClickedWord(phrase.toLowerCase());
-              setClickedContext(ctx);
-              setClickedIsPhrase(true);
-            }} />
-            {clickedWord && (
-              <div style={{ marginTop: "12px" }}>
-                <WordDetail word={clickedWord} context={clickedContext} isPhrase={clickedIsPhrase} onClose={() => setClickedWord(null)} />
-              </div>
-            )}
-          </>
-        )}
-        {view === "vocab" && <VocabBook />}
-        {view === "review" && <ReviewPage />}
-      </div>
+      <ScrollColumn
+        scrollFraction={scrollState.fraction}
+        thumbSize={scrollState.thumbSize}
+        showJump={!scrollState.atBottom}
+        onJumpToLatest={jumpSubtitleToLatest}
+      />
+
+      {/* TODO Task 8: Popover window for short mode */}
     </div>
   );
 }
 
 const styles = {
-  winBtn: (color: string): React.CSSProperties => ({
-    width: "12px",
-    height: "12px",
-    borderRadius: "50%",
-    background: color,
-    display: "inline-block",
-    cursor: "pointer",
-    flexShrink: 0,
-  }),
-  screen: {
-    background: "#0f172a",
+  root: {
+    background: "rgba(15,23,42,0.85)",
+    backdropFilter: "blur(12px)",
+    WebkitBackdropFilter: "blur(12px)",
     minHeight: "100vh",
     display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontFamily: "-apple-system, sans-serif",
+    fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
     color: "#e2e8f0",
-  } as React.CSSProperties,
-  nav: {
-    background: "rgba(15,23,42,0.9)",
-    backdropFilter: "blur(8px)",
-    padding: "8px 14px",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    borderBottom: "1px solid #1e293b",
-  } as React.CSSProperties,
-  navBtn: {
-    border: "none",
-    borderRadius: "6px",
-    padding: "5px 10px",
-    fontSize: "12px",
-    cursor: "pointer",
   } as React.CSSProperties,
   primaryBtn: {
     background: "#1e3a5f",
