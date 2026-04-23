@@ -26,8 +26,9 @@ export async function openWordPopover(opts: PopoverOptions) {
   const x = Math.round(mainPos.x / scaleFactor + opts.anchorX - popoverWidth / 2);
   const y = Math.round(mainPos.y / scaleFactor - popoverHeight - 8);
 
+  const base = window.location.origin;
   popoverWindow = new WebviewWindow("word-detail", {
-    url: `index.html?popover=true&word=${encodeURIComponent(opts.word)}&context=${encodeURIComponent(opts.context)}&isPhrase=${opts.isPhrase}`,
+    url: `${base}?popover=true&word=${encodeURIComponent(opts.word)}&context=${encodeURIComponent(opts.context)}&isPhrase=${opts.isPhrase}`,
     width: popoverWidth,
     height: popoverHeight,
     x: Math.max(0, x),

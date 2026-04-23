@@ -138,9 +138,10 @@ export function SubtitleWindow({ onWordClick, onPhraseSelect, onScrollState }: P
           padding: "12px 16px",
           display: "flex",
           flexDirection: "column",
-          justifyContent: "flex-end",
         }}
       >
+        {/* Spacer pushes content to bottom when lines are few */}
+        <div style={{ flex: 1 }} />
         {lines.length === 0 ? (
           <span style={{ color: "#334155", fontSize: "13px", textAlign: "center" }}>
             等待开始录制…

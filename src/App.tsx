@@ -53,7 +53,7 @@ export default function App() {
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
-  const useBottomPanel = windowHeight >= 250;
+  const useBottomPanel = windowHeight >= 320;
 
   // Close popover when switching to bottom panel mode
   useEffect(() => {
@@ -222,10 +222,11 @@ const styles = {
     background: "rgba(15,23,42,0.85)",
     backdropFilter: "blur(12px)",
     WebkitBackdropFilter: "blur(12px)",
-    minHeight: "100vh",
+    height: "100%",
     display: "flex",
     fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
     color: "#e2e8f0",
+    overflow: "hidden",
   } as React.CSSProperties,
   primaryBtn: {
     background: "#1e3a5f",
