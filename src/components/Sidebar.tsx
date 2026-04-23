@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useState } from "react";
 
 type CaptureMode = "none" | "whisper" | "browser";
@@ -163,7 +164,12 @@ export function Sidebar({ captureMode, onStart, onPause, onStop, onRecalibrate, 
 
       {/* L2: Secondary panel */}
       <div
-        data-tauri-drag-region
+        onMouseDown={(e) => {
+          if (activePanel === "none") {
+            e.preventDefault();
+            getCurrentWindow().startDragging();
+          }
+        }}
         style={{
           width: "120px",
           borderRight: "1px solid rgba(255,255,255,0.04)",

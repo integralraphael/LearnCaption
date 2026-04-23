@@ -4,3 +4,4 @@ button { font-family: inherit; }
 
 /* Hide scrollbars globally but keep scroll functionality */
 ::-webkit-scrollbar { width: 0; height: 0; }
+
