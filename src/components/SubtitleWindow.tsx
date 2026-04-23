@@ -55,7 +55,7 @@ export function SubtitleWindow({ onWordClick, onPhraseSelect }: Props) {
     const node = sel?.anchorNode;
     const lineEl = (node instanceof HTMLElement ? node : node?.parentElement)?.closest("[data-raw-text]");
     const rawText = lineEl?.getAttribute("data-raw-text") ?? "";
-    onPhraseSelect(rawText || text, rawText);
+    onPhraseSelect(text, rawText);
     sel?.removeAllRanges();
   };
 
