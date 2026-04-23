@@ -48,7 +48,6 @@ pub async fn start_browser_capture(
 
     let pipeline = Arc::new(CaptionPipeline::new(
         Arc::clone(&annotator),
-        dict.inner().clone(),
         db.inner().clone(),
         state.current_meeting_id.clone(),
         app.clone(),

@@ -8,6 +8,7 @@ import { VocabBook } from "./components/VocabBook";
 import { ReviewPage } from "./components/ReviewPage";
 import { WordDetail } from "./components/WordDetail";
 import { SourceBadge } from "./components/SourceBadge";
+import { VocabCalibration } from "./components/VocabCalibration";
 
 type View = "subtitle" | "vocab" | "review";
 type CaptureMode = "none" | "whisper" | "browser";
@@ -15,6 +16,7 @@ type CaptureMode = "none" | "whisper" | "browser";
 export default function App() {
   const [modelReady, setModelReady] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
+  const [calibrated, setCalibrated] = useState<boolean | null>(null); // null = loading
   const [captureMode, setCaptureMode] = useState<CaptureMode>("none");
   const [view, setView] = useState<View>("subtitle");
   const [clickedWord, setClickedWord] = useState<string | null>(null);
@@ -23,6 +25,9 @@ export default function App() {
 
   useEffect(() => {
     invoke<boolean>("check_model").then(setModelReady);
+    invoke<string | null>("get_setting", { key: "vocab_calibrated" }).then((v) =>
+      setCalibrated(v === "true")
+    );
     const u1 = listen<number>("model-download-progress", (e) => setDownloadProgress(e.payload));
     const u2 = listen("model-download-done", () => setModelReady(true));
     return () => {
@@ -56,6 +61,11 @@ export default function App() {
       setClickedIsPhrase(false);
     }
   };
+
+  // ── Vocab calibration screen ──
+  if (modelReady && calibrated === false) {
+    return <VocabCalibration onComplete={() => setCalibrated(true)} />;
+  }
 
   // ── Model download screen ──
   if (!modelReady) {
@@ -96,6 +106,13 @@ export default function App() {
           </div>
           <span style={{ color: "#60a5fa", fontWeight: 700, fontSize: "14px" }}>LearnCaption</span>
           <SourceBadge />
+          <span
+            onClick={() => setCalibrated(false)}
+            title="重新校准词汇量"
+            style={{ color: "#475569", fontSize: "12px", cursor: "pointer", marginLeft: "2px" }}
+          >
+            Lv
+          </span>
         </div>
         <div style={{ display: "flex", gap: "4px" }}>
           {(["subtitle", "vocab", "review"] as View[]).map((v) => (

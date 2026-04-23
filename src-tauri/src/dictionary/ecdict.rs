@@ -10,6 +10,8 @@ struct DictEntry {
 pub struct EcdictDictionary {
     /// Maps lowercase entry → translation + frequency rank
     entries: HashMap<String, DictEntry>,
+    /// Words sorted by frequency rank (ascending: most common first)
+    sorted_words: Vec<(String, String, u32)>, // (word, first_line_def, frq)
     stemmer: Stemmer,
 }
 
@@ -40,7 +42,16 @@ impl EcdictDictionary {
             })?
             .filter_map(|r| r.ok())
             .collect();
-        Ok(Self { entries, stemmer: Stemmer::create(Algorithm::English) })
+        let mut sorted_words: Vec<(String, String, u32)> = entries
+            .iter()
+            .map(|(word, e)| {
+                let def = e.translation.lines().next().unwrap_or(&e.translation).to_string();
+                (word.clone(), def, e.frq)
+            })
+            .collect();
+        sorted_words.sort_by_key(|(_w, _d, frq)| *frq);
+
+        Ok(Self { entries, sorted_words, stemmer: Stemmer::create(Algorithm::English) })
     }
 
     /// Look up a word or phrase. Returns the first line of the translation field.
@@ -56,6 +67,26 @@ impl EcdictDictionary {
     /// Return the frequency rank for a word (1 = most common). None if not in dict.
     pub fn frequency(&self, word: &str) -> Option<u32> {
         self.entries.get(&word.to_lowercase()).map(|e| e.frq)
+    }
+
+    /// Total number of words with frequency data.
+    pub fn total_words(&self) -> u32 {
+        self.sorted_words.len() as u32
+    }
+
+    /// Get a slice of words sorted by frequency for calibration UI.
+    /// offset is 0-based, returns (word, definition, frq) tuples.
+    pub fn calibration_words(&self, offset: u32, limit: u32) -> Vec<crate::commands::settings::CalibrationWord> {
+        let start = (offset as usize).min(self.sorted_words.len());
+        let end = (start + limit as usize).min(self.sorted_words.len());
+        self.sorted_words[start..end]
+            .iter()
+            .map(|(word, def, frq)| crate::commands::settings::CalibrationWord {
+                word: word.clone(),
+                definition: def.clone(),
+                frq: *frq,
+            })
+            .collect()
     }
 
     /// Check if a word is "difficult" enough to auto-add to vocabulary.

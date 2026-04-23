@@ -24,6 +24,7 @@ pub struct VocabEntryDto {
 #[serde(rename_all = "camelCase")]
 pub struct WordQueryResult {
     pub definition: Option<String>,
+    pub frequency: Option<u32>,
     pub vocab_entry: Option<VocabEntryDto>,
 }
 
@@ -98,6 +99,7 @@ pub fn query_word(
     dict: State<'_, Arc<EcdictDictionary>>,
 ) -> Result<WordQueryResult, String> {
     let definition = dict.lookup(&word).map(|s| s.to_string());
+    let frequency = dict.frequency(&word);
     let conn = db.lock().map_err(|e| e.to_string())?;
     let vocab_entry = conn.query_row(
         "SELECT id, entry, type, definition, familiarity, occurrence_count, added_at, mastered_at
@@ -105,7 +107,7 @@ pub fn query_word(
         rusqlite::params![word.to_lowercase()],
         row_to_dto,
     ).ok();
-    Ok(WordQueryResult { definition, vocab_entry })
+    Ok(WordQueryResult { definition, frequency, vocab_entry })
 }
 
 fn row_to_dto(row: &rusqlite::Row<'_>) -> rusqlite::Result<VocabEntryDto> {

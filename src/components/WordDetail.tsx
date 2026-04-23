@@ -21,7 +21,7 @@ export function WordDetail({ word, context, isPhrase, onClose, onAddToVocab }: P
   const [downloading, setDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
 
-  const triggerAiTranslate = async () => {
+  const triggerAiTranslate = async (ecdictFallback?: string | null) => {
     setAiLoading(true);
     setAiError(null);
     setAiTranslation(null);
@@ -35,6 +35,9 @@ export function WordDetail({ word, context, isPhrase, onClose, onAddToVocab }: P
       const msg = String(e);
       if (msg.includes("MODEL_NOT_DOWNLOADED")) {
         setModelMissing(true);
+      } else if (msg.includes("AI_OUTPUT_TOO_LONG") && ecdictFallback) {
+        // Model translated entire sentence — fall back to ECDICT definition
+        setAiTranslation(ecdictFallback);
       } else {
         setAiError(msg);
       }
@@ -50,14 +53,20 @@ export function WordDetail({ word, context, isPhrase, onClose, onAddToVocab }: P
     setModelMissing(false);
 
     if (!isPhrase) {
-      // Single word: query ECDICT
-      invoke<WordQueryResult>("query_word", { word }).then(setResult).catch(console.error);
+      // Single word: query ECDICT, then decide whether to trigger AI
+      invoke<WordQueryResult>("query_word", { word }).then(async (r) => {
+        setResult(r);
+        // Skip AI for common words (frq below threshold)
+        const thresholdStr = await invoke<string | null>("get_setting", { key: "ai_translate_frq_threshold" });
+        const threshold = parseInt(thresholdStr ?? "3000", 10);
+        if (r.frequency != null && r.frequency < threshold) return;
+        triggerAiTranslate(r.definition);
+      }).catch(console.error);
     } else {
       setResult(null);
+      // Phrases always get AI translation
+      triggerAiTranslate();
     }
-
-    // Auto-trigger AI translation
-    triggerAiTranslate();
   }, [word]);
 
   useEffect(() => {
@@ -81,7 +90,7 @@ export function WordDetail({ word, context, isPhrase, onClose, onAddToVocab }: P
         definition,
         entryType: isPhrase ? "phrase" : "word",
       });
-      setResult((prev) => prev ? { ...prev, vocabEntry: entry } : { definition: null, vocabEntry: entry });
+      setResult((prev) => prev ? { ...prev, vocabEntry: entry } : { definition: null, frequency: null, vocabEntry: entry });
       onAddToVocab?.(entry);
     } catch (e) {
       console.error("add_entry failed:", e);

@@ -25,6 +25,7 @@ export interface TranscriptLine {
 
 export interface WordQueryResult {
   definition: string | null;
+  frequency: number | null;
   vocabEntry: VocabEntry | null;
 }
 

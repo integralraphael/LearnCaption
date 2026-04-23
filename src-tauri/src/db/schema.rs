@@ -40,6 +40,14 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
             created_at DATETIME NOT NULL DEFAULT (datetime('now'))
         );
 
+        CREATE TABLE IF NOT EXISTS settings (
+            key   TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+
+        -- Default settings (INSERT OR IGNORE so they're only set once)
+        INSERT OR IGNORE INTO settings (key, value) VALUES ('ai_translate_frq_threshold', '3000');
+
         CREATE INDEX IF NOT EXISTS idx_vocab_sentences_vocab_id
             ON vocab_sentences(vocab_id);
         CREATE INDEX IF NOT EXISTS idx_transcript_lines_meeting_id

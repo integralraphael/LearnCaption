@@ -230,5 +230,14 @@ pub fn translate_sync(
         ctx.decode(&mut batch).map_err(|e| format!("decode step: {e}"))?;
     }
 
-    Ok(output.trim().to_string())
+    let trimmed = output.trim().to_string();
+
+    // Guard: if translating a single word but output is suspiciously long,
+    // the model likely translated the entire context sentence — signal frontend to use ECDICT.
+    let is_single_word = !selection.contains(' ');
+    if is_single_word && trimmed.chars().count() > 15 {
+        return Err("AI_OUTPUT_TOO_LONG".into());
+    }
+
+    Ok(trimmed)
 }
