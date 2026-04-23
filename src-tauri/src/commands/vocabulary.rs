@@ -1,7 +1,8 @@
 use serde::Serialize;
 use tauri::State;
 
-use crate::db::AppDb;
+use crate::commands::pipeline::PipelineState;
+use crate::db::{self, AppDb};
 use crate::dictionary::EcdictDictionary;
 use std::sync::Arc;
 
@@ -27,15 +28,15 @@ pub struct WordQueryResult {
 }
 
 /// Add a word/phrase to the vocabulary book.
-/// Note: the Aho-Corasick annotator is built once when recording starts (in start_recording).
-/// Words added mid-session will be saved to DB but will only be highlighted in subtitles
-/// after recording is stopped and restarted.
+/// If a capture session is running, rebuilds the Aho-Corasick automaton
+/// so the new word is highlighted immediately in subsequent captions.
 #[tauri::command]
 pub fn add_entry(
     entry: String,
     definition: String,
     entry_type: String,
     db: State<'_, AppDb>,
+    pipeline: State<'_, PipelineState>,
 ) -> Result<VocabEntryDto, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     conn.execute(
@@ -50,6 +51,16 @@ pub fn add_entry(
         rusqlite::params![entry.to_lowercase()],
         row_to_dto,
     ).map_err(|e| e.to_string())?;
+    drop(conn);
+
+    // Rebuild automaton so the new word is highlighted immediately
+    if let Some(ann) = pipeline.annotator.lock().unwrap().as_ref() {
+        if let Ok(entries) = db::load_vocab_entries(&db) {
+            let mut ann = ann.lock().unwrap();
+            ann.rebuild_automaton(entries);
+        }
+    }
+
     Ok(row)
 }
 

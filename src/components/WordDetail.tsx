@@ -74,7 +74,8 @@ export function WordDetail({ word, context, isPhrase, onClose, onAddToVocab }: P
 
   const handleAddToVocab = async () => {
     if (!result) return;
-    const definition = result.definition ?? "";
+    // Prefer AI translation (contextual) over ECDICT
+    const definition = aiTranslation ?? result.definition ?? "";
     try {
       const entry = await invoke<VocabEntry>("add_entry", {
         entry: word,

@@ -29,6 +29,8 @@ pub async fn start_browser_capture(
     let vocab_entries = load_vocab_entries(&db).map_err(|e| e.to_string())?;
     let mut annotator = Annotator::new(dict.inner().clone());
     annotator.rebuild_automaton(vocab_entries);
+    let annotator = Arc::new(Mutex::new(annotator));
+    *state.annotator.lock().unwrap() = Some(Arc::clone(&annotator));
 
     let meeting_id: i64 = {
         let conn = db.lock().map_err(|e| e.to_string())?;
@@ -45,7 +47,8 @@ pub async fn start_browser_capture(
     }
 
     let pipeline = Arc::new(CaptionPipeline::new(
-        Arc::new(Mutex::new(annotator)),
+        Arc::clone(&annotator),
+        dict.inner().clone(),
         db.inner().clone(),
         state.current_meeting_id.clone(),
         app.clone(),
@@ -66,6 +69,7 @@ pub async fn stop_browser_capture(
     if let Some(handle) = state.ws_task.lock().unwrap().take() {
         handle.abort();
     }
+    *state.annotator.lock().unwrap() = None;
 
     {
         let mut id_guard = state.current_meeting_id.lock().unwrap();

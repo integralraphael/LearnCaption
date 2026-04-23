@@ -13,6 +13,9 @@ pub struct PipelineState {
     pub sidecar: Arc<Mutex<Option<AudioSidecar>>>,
     pub current_meeting_id: Arc<Mutex<Option<i64>>>,
     pub ws_task: Arc<Mutex<Option<tauri::async_runtime::JoinHandle<()>>>>,
+    /// Live annotator for the current capture session.
+    /// Stored here so `add_entry` can rebuild the automaton immediately.
+    pub annotator: Arc<Mutex<Option<Arc<Mutex<Annotator>>>>>,
 }
 
 #[tauri::command]
@@ -47,6 +50,8 @@ pub async fn start_recording(
     let vocab_entries = load_vocab_entries(&db).map_err(|e| e.to_string())?;
     let mut annotator = Annotator::new(dict.inner().clone());
     annotator.rebuild_automaton(vocab_entries);
+    let annotator = Arc::new(Mutex::new(annotator));
+    *state.annotator.lock().unwrap() = Some(Arc::clone(&annotator));
 
     let meeting_id: i64 = {
         let conn = db.lock().map_err(|e| e.to_string())?;
@@ -63,7 +68,8 @@ pub async fn start_recording(
     }
 
     let pipeline = Arc::new(CaptionPipeline::new(
-        Arc::new(Mutex::new(annotator)),
+        Arc::clone(&annotator),
+        dict.inner().clone(),
         db.inner().clone(),
         state.current_meeting_id.clone(),
         app.clone(),
@@ -145,6 +151,7 @@ pub async fn stop_recording(
     db: State<'_, AppDb>,
 ) -> Result<(), String> {
     *state.sidecar.lock().unwrap() = None;
+    *state.annotator.lock().unwrap() = None;
 
     {
         let mut id_guard = state.current_meeting_id.lock().unwrap();

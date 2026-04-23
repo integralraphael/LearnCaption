@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter};
 
 use crate::db::AppDb;
+use crate::dictionary::EcdictDictionary;
 use crate::pipeline::Annotator;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,6 +45,7 @@ const SPEAKER_COLORS: &[&str] = &[
 /// Used by both the Whisper thread and the WebSocket server.
 pub struct CaptionPipeline {
     annotator: Arc<Mutex<Annotator>>,
+    dict: Arc<EcdictDictionary>,
     db: AppDb,
     meeting_id: Arc<Mutex<Option<i64>>>,
     app: AppHandle,
@@ -54,11 +56,12 @@ pub struct CaptionPipeline {
 impl CaptionPipeline {
     pub fn new(
         annotator: Arc<Mutex<Annotator>>,
+        dict: Arc<EcdictDictionary>,
         db: AppDb,
         meeting_id: Arc<Mutex<Option<i64>>>,
         app: AppHandle,
     ) -> Self {
-        Self { annotator, db, meeting_id, app, last_line_id: Mutex::new(None) }
+        Self { annotator, dict, db, meeting_id, app, last_line_id: Mutex::new(None) }
     }
 
     pub fn app(&self) -> &AppHandle {
@@ -142,23 +145,48 @@ impl CaptionPipeline {
         // Only count vocab on new content (NewBlock / Append).
         // Update is ASR revision of the same sentence — skip to avoid inflated counts.
         if raw.action != CaptionAction::Update {
+            let mut new_entries_added = false;
             let conn = self.db.lock().unwrap();
+
             for token in &line.tokens {
                 if let Some(vocab_id) = token.vocab_id {
-                    if let Err(e) = conn.execute(
+                    // Existing vocab word — count occurrence
+                    let _ = conn.execute(
                         "INSERT INTO vocab_sentences (vocab_id, line_id, meeting_id) \
                          VALUES (?1, ?2, ?3)",
                         rusqlite::params![vocab_id, line_id, meeting_id],
-                    ) {
-                        let _ = self.app.emit("pipeline-error", format!("vocab_sentences insert: {e}"));
-                    }
-                    if let Err(e) = conn.execute(
+                    );
+                    let _ = conn.execute(
                         "UPDATE vocabulary SET occurrence_count = occurrence_count + 1 \
                          WHERE id = ?1",
                         rusqlite::params![vocab_id],
-                    ) {
-                        let _ = self.app.emit("pipeline-error", format!("occurrence_count update: {e}"));
+                    );
+                } else {
+                    // Not in vocab — auto-add if difficult enough
+                    let word = token.text.trim().to_lowercase();
+                    // Skip short words and non-alpha tokens
+                    if word.len() < 3 || !word.chars().all(|c| c.is_ascii_alphabetic()) {
+                        continue;
                     }
+                    if let Some((base, def, true)) = self.dict.lookup_with_difficulty(&word) {
+                        let _ = conn.execute(
+                            "INSERT INTO vocabulary (entry, type, definition, familiarity, occurrence_count) \
+                             VALUES (?1, 'word', ?2, 0, 1) \
+                             ON CONFLICT(entry) DO UPDATE SET occurrence_count = occurrence_count + 1",
+                            rusqlite::params![&base, def],
+                        );
+                        new_entries_added = true;
+                    }
+                }
+            }
+
+            drop(conn);
+
+            // Rebuild automaton so newly added words get highlighted immediately
+            if new_entries_added {
+                if let Ok(entries) = crate::db::load_vocab_entries(&self.db) {
+                    let mut ann = self.annotator.lock().unwrap();
+                    ann.rebuild_automaton(entries);
                 }
             }
         }

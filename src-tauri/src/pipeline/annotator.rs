@@ -200,7 +200,7 @@ mod tests {
     #[test]
     fn test_annotates_single_vocab_word() {
         let a = make_annotator_with_vocab(vec![vocab(1, "leverage", "充分利用", 3)]);
-        let line = a.annotate("we should leverage this", 1, 1, 0, true);
+        let line = a.annotate("we should leverage this", 1, 1, 0, "new_block");
         let tok = line.tokens.iter().find(|t| t.text == "leverage").unwrap();
         assert_eq!(tok.definition.as_deref(), Some("充分利用"));
         assert_eq!(tok.color.as_deref(), Some("orange")); // count=3 → orange
@@ -212,7 +212,7 @@ mod tests {
             vocab(1, "look forward to", "期待", 1),
             vocab(2, "forward", "向前", 0),
         ]);
-        let line = a.annotate("I look forward to the meeting", 1, 1, 0, true);
+        let line = a.annotate("I look forward to the meeting", 1, 1, 0, "new_block");
         // The phrase "look forward to" should be a single token
         assert!(
             line.tokens.iter().any(|t| t.text == "look forward to"),
@@ -232,7 +232,7 @@ mod tests {
             vocab(2, "beta",  "乙", 3),   // orange
             vocab(3, "gamma", "丙", 7),   // red
         ]);
-        let line = a.annotate("alpha beta gamma", 1, 1, 0, true);
+        let line = a.annotate("alpha beta gamma", 1, 1, 0, "new_block");
         let colors: Vec<_> = line.tokens.iter().map(|t| t.color.as_deref()).collect();
         assert_eq!(colors, vec![Some("yellow"), Some("orange"), Some("red")]);
     }
@@ -240,7 +240,7 @@ mod tests {
     #[test]
     fn test_unannotated_word_has_no_vocab_id() {
         let a = make_annotator_with_vocab(vec![]);
-        let line = a.annotate("hello world", 1, 1, 0, true);
+        let line = a.annotate("hello world", 1, 1, 0, "new_block");
         for tok in &line.tokens {
             assert!(tok.vocab_id.is_none());
         }

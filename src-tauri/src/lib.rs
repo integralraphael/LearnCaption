@@ -48,6 +48,7 @@ pub fn run() {
             sidecar: Arc::new(Mutex::new(None)),
             current_meeting_id: Arc::new(Mutex::new(None)),
             ws_task,
+            annotator: Arc::new(Mutex::new(None)),
         })
         .manage(TranslationState {
             loaded: Arc::new(Mutex::new(None)),

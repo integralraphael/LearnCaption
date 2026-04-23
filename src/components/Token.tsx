@@ -18,9 +18,8 @@ export function Token({ token, onClick }: Props) {
     <span
       onClick={() => onClick?.(token)}
       style={{
-        display: "inline-flex",
-        flexDirection: "column",
-        alignItems: "center",
+        position: "relative",
+        display: "inline-block",
         marginRight: "3px",
         cursor: onClick ? "pointer" : "default",
         verticalAlign: "top",
@@ -35,17 +34,22 @@ export function Token({ token, onClick }: Props) {
       >
         {token.text}
       </span>
-      <span
-        style={{
-          fontSize: "0.65em",
-          color: color ?? "#94a3b8",
-          lineHeight: "1.2",
-          minHeight: "1.2em",
-          whiteSpace: "nowrap",
-        }}
-      >
-        {token.definition ?? ""}
-      </span>
+      {token.definition && (
+        <span
+          style={{
+            position: "absolute",
+            left: 0,
+            top: "100%",
+            fontSize: "0.65em",
+            color: color ?? "#94a3b8",
+            lineHeight: "1.2",
+            whiteSpace: "nowrap",
+            pointerEvents: "none",
+          }}
+        >
+          {token.definition}
+        </span>
+      )}
     </span>
   );
 }

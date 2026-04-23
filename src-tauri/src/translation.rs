@@ -137,7 +137,6 @@ pub fn ensure_loaded(state: &Arc<Mutex<Option<LoadedModel>>>, model_path: &PathB
 fn build_user_content(selection: &str, context: Option<&str>) -> String {
     match context {
         Some(ctx) if !ctx.is_empty() && ctx != selection => {
-            // 上下文翻译模板: full sentence as context, word/phrase as source_text
             format!(
                 "{ctx}\n参考上面的信息，把下面的文本翻译成中文，注意不需要翻译上文，也不要额外解释：\n{selection}"
             )
