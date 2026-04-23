@@ -8,6 +8,7 @@ use crate::dictionary::EcdictDictionary;
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CalibrationWord {
+    pub rank: u32,  // 0-based global position in frequency-sorted list
     pub word: String,
     pub definition: String,
     pub frq: u32,

@@ -81,7 +81,9 @@ impl EcdictDictionary {
         let end = (start + limit as usize).min(self.sorted_words.len());
         self.sorted_words[start..end]
             .iter()
-            .map(|(word, def, frq)| crate::commands::settings::CalibrationWord {
+            .enumerate()
+            .map(|(i, (word, def, frq))| crate::commands::settings::CalibrationWord {
+                rank: (start + i) as u32,
                 word: word.clone(),
                 definition: def.clone(),
                 frq: *frq,
