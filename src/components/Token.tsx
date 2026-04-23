@@ -18,18 +18,15 @@ export function Token({ token, onClick }: Props) {
     <span
       onClick={() => onClick?.(token)}
       style={{
-        position: "relative",
-        display: "inline-block",
+        display: "inline",
         marginRight: "3px",
         cursor: onClick ? "pointer" : "default",
-        verticalAlign: "top",
       }}
     >
       <span
         style={{
           color: color ?? "inherit",
           fontWeight: color ? 600 : "normal",
-          lineHeight: "1.4",
         }}
       >
         {token.text}
@@ -37,14 +34,9 @@ export function Token({ token, onClick }: Props) {
       {token.definition && (
         <span
           style={{
-            position: "absolute",
-            left: 0,
-            top: "100%",
-            fontSize: "0.65em",
-            color: color ?? "#94a3b8",
-            lineHeight: "1.2",
-            whiteSpace: "nowrap",
-            pointerEvents: "none",
+            fontSize: "0.7em",
+            color: color ? color + "bb" : "#64748b",
+            marginLeft: "2px",
           }}
         >
           {token.definition}
