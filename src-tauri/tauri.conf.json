@@ -15,12 +15,12 @@
         "label": "main",
         "title": "LearnCaption",
         "width": 900,
-        "height": 620,
-        "minWidth": 600,
-        "minHeight": 400,
+        "height": 200,
+        "minWidth": 500,
+        "minHeight": 120,
         "decorations": false,
         "transparent": true,
-        "alwaysOnTop": false
+        "alwaysOnTop": true
       }
     ],
     "security": {

@@ -1,3 +1,6 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 body { background: transparent; overflow: hidden; }
 button { font-family: inherit; }
+
+/* Hide scrollbars globally but keep scroll functionality */
+::-webkit-scrollbar { width: 0; height: 0; }

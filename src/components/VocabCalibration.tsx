@@ -154,14 +154,12 @@ export function VocabCalibration({ onComplete }: Props) {
 
   return (
     <div style={{
-      background: "#0f172a",
-      minHeight: "100vh",
       display: "flex",
       flexDirection: "column",
       alignItems: "center",
       justifyContent: "center",
-      padding: "24px 16px",
-      fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+      padding: "16px",
+      height: "100%",
     }}>
       <style>{`.cal-list::-webkit-scrollbar { display: none; }`}</style>
 
