@@ -52,3 +52,13 @@ pub fn get_calibration_words(
 pub fn get_dict_total(dict: State<'_, Arc<EcdictDictionary>>) -> u32 {
     dict.total_words()
 }
+
+#[tauri::command]
+pub fn toggle_always_on_top(app: tauri::AppHandle) -> Result<bool, String> {
+    use tauri::Manager;
+    let win = app.get_webview_window("main").ok_or("window not found")?;
+    let current = win.is_always_on_top().map_err(|e| e.to_string())?;
+    let new_val = !current;
+    win.set_always_on_top(new_val).map_err(|e| e.to_string())?;
+    Ok(new_val)
+}

@@ -75,6 +75,7 @@ pub fn run() {
             commands::settings::set_setting,
             commands::settings::get_calibration_words,
             commands::settings::get_dict_total,
+            commands::settings::toggle_always_on_top,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

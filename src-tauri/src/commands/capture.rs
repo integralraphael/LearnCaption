@@ -1,5 +1,5 @@
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, State};
 
 use crate::caption_source::{ws_server, CaptionPipeline};
 use crate::commands::pipeline::PipelineState;
@@ -42,10 +42,6 @@ pub async fn start_browser_capture(
     };
     *state.current_meeting_id.lock().unwrap() = Some(meeting_id);
 
-    if let Some(win) = app.get_webview_window("main") {
-        let _ = win.set_always_on_top(true);
-    }
-
     let pipeline = Arc::new(CaptionPipeline::new(
         Arc::clone(&annotator),
         db.inner().clone(),
@@ -80,10 +76,6 @@ pub async fn stop_browser_capture(
             ).map_err(|e| e.to_string())?;
         }
         *id_guard = None;
-    }
-
-    if let Some(win) = app.get_webview_window("main") {
-        let _ = win.set_always_on_top(false);
     }
 
     let _ = app.emit("source-changed", "none");
