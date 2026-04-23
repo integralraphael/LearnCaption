@@ -91,12 +91,12 @@ export function SubtitleWindow({ onWordClick, onPhraseSelect, onScrollState }: P
     }
   }, [reportScroll]);
 
-  // Expose jumpToLatest via ref-like pattern: attach to component
-  // Parent calls this via the onScrollState callback pattern instead
-
-  // Attach jumpToLatest to a ref the parent can call
-  const jumpRef = useRef(jumpToLatest);
-  jumpRef.current = jumpToLatest;
+  // Listen for external jump-to-latest requests
+  useEffect(() => {
+    const handler = () => jumpToLatest();
+    window.addEventListener("lc-jump-to-latest", handler);
+    return () => window.removeEventListener("lc-jump-to-latest", handler);
+  }, [jumpToLatest]);
 
   // Progressive opacity: last 3 lines full, older lines fade
   const getLineOpacity = (index: number) => {
@@ -131,7 +131,6 @@ export function SubtitleWindow({ onWordClick, onPhraseSelect, onScrollState }: P
         className="lc-subtitle-area"
         onScroll={handleScroll}
         onMouseUp={handleMouseUp}
-        data-jump-to-latest
         style={{
           flex: 1,
           overflowY: "auto",
@@ -186,10 +185,7 @@ export function SubtitleWindow({ onWordClick, onPhraseSelect, onScrollState }: P
   );
 }
 
-// Export a helper to get the jump function from the DOM
+// Export a helper that dispatches an event to trigger jumpToLatest (which resets autoFollow)
 export function jumpSubtitleToLatest() {
-  const el = document.querySelector("[data-jump-to-latest]");
-  if (el) {
-    el.scrollTop = el.scrollHeight;
-  }
+  window.dispatchEvent(new Event("lc-jump-to-latest"));
 }

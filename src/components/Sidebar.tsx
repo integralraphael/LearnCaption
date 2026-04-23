@@ -10,9 +10,11 @@ interface Props {
   onPause: () => void;
   onStop: () => void;
   onRecalibrate: () => void;
+  /** When true, all L1 buttons are grayed out and non-interactive (calibration mode) */
+  disabled?: boolean;
 }
 
-export function Sidebar({ captureMode, onStart, onPause, onStop, onRecalibrate }: Props) {
+export function Sidebar({ captureMode, onStart, onPause, onStop, onRecalibrate, disabled }: Props) {
   const [activePanel, setActivePanel] = useState<L2Panel>("none");
   const [alwaysOnTop, setAlwaysOnTop] = useState(true);
   const [selectedSource, setSelectedSource] = useState<"whisper" | "browser">("browser");
@@ -53,6 +55,7 @@ export function Sidebar({ captureMode, onStart, onPause, onStop, onRecalibrate }
           gap: "14px",
           borderRight: "1px solid rgba(255,255,255,0.04)",
           flexShrink: 0,
+          ...(disabled ? { opacity: 0.3, pointerEvents: "none" as const } : {}),
         }}
       >
         {/* Play / Pause */}

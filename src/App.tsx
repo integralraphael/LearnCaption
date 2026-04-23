@@ -131,6 +131,7 @@ export default function App() {
           onPause={() => {}}
           onStop={() => {}}
           onRecalibrate={() => {}}
+          disabled
         />
         <div style={{ flex: 1, overflow: "auto" }}>
           <VocabCalibration onComplete={() => setCalibrated(true)} />
