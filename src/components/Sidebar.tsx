@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useState } from "react";
+import type { DisplayConfig } from "../contexts/DisplaySettings";
+import { PRESET_COLORS } from "../contexts/DisplaySettings";
 
 type CaptureMode = "none" | "whisper" | "browser";
 type L2Panel = "none" | "source" | "settings";
@@ -11,11 +13,12 @@ interface Props {
   onPause: () => void;
   onStop: () => void;
   onRecalibrate: () => void;
-  /** When true, all L1 buttons are grayed out and non-interactive (calibration mode) */
   disabled?: boolean;
+  displayConfig: DisplayConfig;
+  onDisplayChange: (updates: Partial<DisplayConfig>) => void;
 }
 
-export function Sidebar({ captureMode, onStart, onPause, onStop, onRecalibrate, disabled }: Props) {
+export function Sidebar({ captureMode, onStart, onPause, onStop, onRecalibrate, disabled, displayConfig, onDisplayChange }: Props) {
   const [activePanel, setActivePanel] = useState<L2Panel>("none");
   const [alwaysOnTop, setAlwaysOnTop] = useState(true);
   const [selectedSource, setSelectedSource] = useState<"whisper" | "browser">("browser");
@@ -254,36 +257,95 @@ export function Sidebar({ captureMode, onStart, onPause, onStop, onRecalibrate, 
         )}
 
         {activePanel === "settings" && (
-          <div style={{ padding: "10px 6px", display: "flex", flexDirection: "column", gap: "4px" }}>
-            <div style={panelHeader}>设置</div>
+          <div style={{ padding: "10px 6px", display: "flex", flexDirection: "column", gap: "6px", overflowY: "auto", flex: 1 }}>
+            <div style={panelHeader}>高亮颜色</div>
+
+            {/* Color mode toggle */}
+            <div style={{ display: "flex", gap: "3px" }}>
+              {(["single", "proficiency"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  onClick={() => onDisplayChange({ colorMode: mode })}
+                  style={{
+                    flex: 1, fontSize: "9px", padding: "3px 2px", borderRadius: "4px", cursor: "pointer",
+                    background: displayConfig.colorMode === mode ? "rgba(96,165,250,0.25)" : "rgba(255,255,255,0.04)",
+                    color: displayConfig.colorMode === mode ? "#60a5fa" : "#64748b",
+                    border: displayConfig.colorMode === mode ? "1px solid rgba(96,165,250,0.4)" : "1px solid transparent",
+                  }}
+                >
+                  {mode === "single" ? "单色" : "熟练度"}
+                </button>
+              ))}
+            </div>
+
+            {/* Single mode: one swatch row */}
+            {displayConfig.colorMode === "single" && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "3px" }}>
+                {PRESET_COLORS.map((c) => (
+                  <Swatch key={c} color={c} selected={displayConfig.colorSingle === c}
+                    onClick={() => onDisplayChange({ colorSingle: c })} />
+                ))}
+              </div>
+            )}
+
+            {/* Proficiency mode: 3 rows */}
+            {displayConfig.colorMode === "proficiency" && (["easy", "medium", "hard"] as const).map((level) => {
+              const key = `color${level.charAt(0).toUpperCase() + level.slice(1)}` as "colorEasy" | "colorMedium" | "colorHard";
+              const label = { easy: "初", medium: "中", hard: "难" }[level];
+              return (
+                <div key={level} style={{ display: "flex", alignItems: "center", gap: "3px" }}>
+                  <span style={{ fontSize: "9px", color: "#475569", width: "12px", flexShrink: 0 }}>{label}</span>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "2px" }}>
+                    {PRESET_COLORS.map((c) => (
+                      <Swatch key={c} color={c} selected={displayConfig[key] === c}
+                        onClick={() => onDisplayChange({ [key]: c })} />
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+
+            <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", marginTop: "2px", paddingTop: "6px" }}>
+              <div style={panelHeader}>翻译位置</div>
+            </div>
+            <div style={{ display: "flex", gap: "2px" }}>
+              {([
+                ["inline_bracket", "[内]"],
+                ["below_stagger", "↓错"],
+                ["none", "关"],
+              ] as const).map(([val, label]) => (
+                <button
+                  key={val}
+                  onClick={() => onDisplayChange({ translationPosition: val })}
+                  style={{
+                    flex: 1, fontSize: "9px", padding: "3px 1px", borderRadius: "4px", cursor: "pointer",
+                    background: displayConfig.translationPosition === val ? "rgba(96,165,250,0.25)" : "rgba(255,255,255,0.04)",
+                    color: displayConfig.translationPosition === val ? "#60a5fa" : "#64748b",
+                    border: displayConfig.translationPosition === val ? "1px solid rgba(96,165,250,0.4)" : "1px solid transparent",
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", marginTop: "2px", paddingTop: "6px" }}>
+              <div style={panelHeader}>全文翻译</div>
+            </div>
+            <div onClick={() => onDisplayChange({ sentenceTranslation: !displayConfig.sentenceTranslation })}
+              style={{ ...settingsItem, justifyContent: "space-between" }}>
+              <span style={{ color: "#94a3b8", fontSize: "11px" }}>每句翻译</span>
+              <Toggle on={displayConfig.sentenceTranslation} />
+            </div>
+
+            <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", marginTop: "2px", paddingTop: "6px" }} />
+
             <div onClick={onRecalibrate} style={settingsItem}>
               <span style={{ color: "#94a3b8", fontSize: "11px" }}>🎯 词汇校准</span>
             </div>
             <div onClick={handleTogglePin} style={{ ...settingsItem, justifyContent: "space-between" }}>
               <span style={{ color: "#94a3b8", fontSize: "11px" }}>📌 置顶</span>
-              <div
-                style={{
-                  width: "28px",
-                  height: "15px",
-                  borderRadius: "8px",
-                  background: alwaysOnTop ? "#34d399" : "#334155",
-                  position: "relative",
-                  transition: "background 0.2s",
-                }}
-              >
-                <div
-                  style={{
-                    width: "11px",
-                    height: "11px",
-                    borderRadius: "50%",
-                    background: "white",
-                    position: "absolute",
-                    top: "2px",
-                    transition: "right 0.2s",
-                    right: alwaysOnTop ? "2px" : "15px",
-                  }}
-                />
-              </div>
+              <Toggle on={alwaysOnTop} />
             </div>
           </div>
         )}
@@ -338,3 +400,35 @@ const settingsItem: React.CSSProperties = {
   borderRadius: "5px",
   cursor: "pointer",
 };
+
+function Swatch({ color, selected, onClick }: { color: string; selected: boolean; onClick: () => void }) {
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        width: "13px", height: "13px", borderRadius: "50%",
+        background: color, cursor: "pointer", flexShrink: 0,
+        outline: selected ? `2px solid ${color}` : "none",
+        outlineOffset: "1px",
+        opacity: selected ? 1 : 0.5,
+      }}
+    />
+  );
+}
+
+function Toggle({ on }: { on: boolean }) {
+  return (
+    <div style={{
+      width: "28px", height: "15px", borderRadius: "8px",
+      background: on ? "#34d399" : "#334155",
+      position: "relative", transition: "background 0.2s", flexShrink: 0,
+    }}>
+      <div style={{
+        width: "11px", height: "11px", borderRadius: "50%",
+        background: "white", position: "absolute",
+        top: "2px", transition: "right 0.2s",
+        right: on ? "2px" : "15px",
+      }} />
+    </div>
+  );
+}

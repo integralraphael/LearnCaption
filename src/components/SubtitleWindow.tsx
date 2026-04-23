@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { AnnotatedLine, WordToken } from "../types/subtitle";
 import { Token } from "./Token";
+import { useDisplaySettings } from "../contexts/DisplaySettings";
 
 interface Props {
   onWordClick?: (token: WordToken, sentenceText: string) => void;
@@ -12,8 +14,11 @@ interface Props {
 
 export function SubtitleWindow({ onWordClick, onPhraseSelect, onScrollState }: Props) {
   const [lines, setLines] = useState<AnnotatedLine[]>([]);
+  const [lineTranslations, setLineTranslations] = useState<Map<number, string>>(new Map());
+  const translatedIdsRef = useRef<Set<number>>(new Set());
   const containerRef = useRef<HTMLDivElement>(null);
   const autoFollowRef = useRef(true);
+  const config = useDisplaySettings();
 
   useEffect(() => {
     let active = true;
@@ -46,6 +51,17 @@ export function SubtitleWindow({ onWordClick, onPhraseSelect, onScrollState }: P
     }
     reportScroll();
   }, [lines]);
+
+  // Sentence translation: when a new line appears, translate the previous (now finalized) line
+  useEffect(() => {
+    if (!config.sentenceTranslation || lines.length < 2) return;
+    const prevLine = lines[lines.length - 2];
+    if (translatedIdsRef.current.has(prevLine.lineId)) return;
+    translatedIdsRef.current.add(prevLine.lineId);
+    invoke<string>("translate_selection", { selection: prevLine.rawText, context: null })
+      .then((t) => setLineTranslations((prev) => new Map(prev).set(prevLine.lineId, t)))
+      .catch(() => {}); // silently ignore (model not downloaded etc.)
+  }, [lines.length, config.sentenceTranslation]);
 
   const reportScroll = useCallback(() => {
     const el = containerRef.current;
@@ -141,9 +157,9 @@ export function SubtitleWindow({ onWordClick, onPhraseSelect, onScrollState }: P
           </span>
         ) : (
           lines.map((line, i) => (
+            <React.Fragment key={line.lineId + "-" + i}>
             <div
               className="lc-line"
-              key={line.lineId + "-" + i}
               data-raw-text={line.rawText}
               {...(line.speaker ? { "data-speaker": line.speaker } : {})}
               style={{
@@ -159,18 +175,33 @@ export function SubtitleWindow({ onWordClick, onPhraseSelect, onScrollState }: P
                   : {}),
               }}
             >
-              {line.tokens.map((token, j) => (
-                <Token
-                  key={j}
-                  token={token}
-                  onClick={
-                    onWordClick
-                      ? (t) => onWordClick(t, line.rawText)
-                      : undefined
-                  }
-                />
-              ))}
+              {(() => {
+                let vocabCount = 0;
+                return line.tokens.map((token, j) => {
+                  const vi = token.definition ? vocabCount++ : 0;
+                  return (
+                    <Token
+                      key={j}
+                      token={token}
+                      vocabIndex={vi}
+                      onClick={onWordClick ? (t) => onWordClick(t, line.rawText) : undefined}
+                    />
+                  );
+                });
+              })()}
             </div>
+            {lineTranslations.get(line.lineId) && (
+              <div style={{
+                fontSize: "12px",
+                color: "#64748b",
+                lineHeight: "1.6",
+                marginBottom: "4px",
+                marginTop: "-2px",
+              }}>
+                {lineTranslations.get(line.lineId)}
+              </div>
+            )}
+            </React.Fragment>
           ))
         )}
       </div>

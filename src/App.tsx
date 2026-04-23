@@ -8,6 +8,8 @@ import { ScrollColumn } from "./components/ScrollColumn";
 import { WordDetail } from "./components/WordDetail";
 import { VocabCalibration } from "./components/VocabCalibration";
 import { openWordPopover, closeWordPopover } from "./components/WordPopover";
+import { DisplaySettingsContext, defaultDisplayConfig, DB_KEY_MAP } from "./contexts/DisplaySettings";
+import type { DisplayConfig } from "./contexts/DisplaySettings";
 
 type CaptureMode = "none" | "whisper" | "browser";
 
@@ -32,11 +34,29 @@ export default function App() {
   // Window height for adaptive word detail
   const [windowHeight, setWindowHeight] = useState(window.innerHeight);
 
+  // Display settings
+  const [displayConfig, setDisplayConfig] = useState<DisplayConfig>(defaultDisplayConfig);
+
   useEffect(() => {
     invoke<boolean>("check_model").then(setModelReady);
     invoke<string | null>("get_setting", { key: "vocab_calibrated" }).then((v) =>
       setCalibrated(v === "true")
     );
+    // Load display settings
+    Promise.all(
+      (Object.entries(DB_KEY_MAP) as [keyof DisplayConfig, string][]).map(([field, dbKey]) =>
+        invoke<string | null>("get_setting", { key: dbKey }).then((v) => [field, v] as const)
+      )
+    ).then((entries) => {
+      const updates: Partial<DisplayConfig> = {};
+      for (const [field, value] of entries) {
+        if (value !== null) {
+          (updates as Record<string, unknown>)[field] =
+            field === "sentenceTranslation" ? value === "true" : value;
+        }
+      }
+      setDisplayConfig((prev) => ({ ...prev, ...updates }));
+    });
     const u1 = listen<number>("model-download-progress", (e) =>
       setDownloadProgress(e.payload)
     );
@@ -79,6 +99,13 @@ export default function App() {
     if (captureMode === "whisper") await invoke("stop_recording");
     else if (captureMode === "browser") await invoke("stop_browser_capture");
     setCaptureMode("none");
+  };
+
+  const handleDisplayChange = async (updates: Partial<DisplayConfig>) => {
+    for (const [key, value] of Object.entries(updates) as [keyof DisplayConfig, unknown][]) {
+      await invoke("set_setting", { key: DB_KEY_MAP[key], value: String(value) });
+    }
+    setDisplayConfig((prev) => ({ ...prev, ...updates }));
   };
 
   const handleWordClick = (token: WordToken, sentenceText: string) => {
@@ -124,6 +151,7 @@ export default function App() {
   // ── Vocab calibration ──
   if (modelReady && calibrated === false) {
     return (
+      <DisplaySettingsContext.Provider value={displayConfig}>
       <div style={styles.root}>
         <Sidebar
           captureMode="none"
@@ -132,12 +160,15 @@ export default function App() {
           onStop={() => {}}
           onRecalibrate={() => {}}
           disabled
+          displayConfig={displayConfig}
+          onDisplayChange={handleDisplayChange}
         />
         <div style={{ flex: 1, overflow: "auto" }}>
           <VocabCalibration onComplete={() => setCalibrated(true)} />
         </div>
         <div style={{ width: "32px", borderLeft: "1px solid rgba(255,255,255,0.04)", flexShrink: 0 }} />
       </div>
+      </DisplaySettingsContext.Provider>
     );
   }
 
@@ -176,6 +207,7 @@ export default function App() {
 
   // ── Main HUD ──
   return (
+    <DisplaySettingsContext.Provider value={displayConfig}>
     <div style={styles.root}>
       <Sidebar
         captureMode={captureMode}
@@ -183,6 +215,8 @@ export default function App() {
         onPause={handlePause}
         onStop={handleStop}
         onRecalibrate={() => setCalibrated(false)}
+        displayConfig={displayConfig}
+        onDisplayChange={handleDisplayChange}
       />
 
       {/* Main content area */}
@@ -214,6 +248,7 @@ export default function App() {
       />
 
     </div>
+    </DisplaySettingsContext.Provider>
   );
 }
 
