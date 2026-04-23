@@ -98,13 +98,6 @@ export function SubtitleWindow({ onWordClick, onPhraseSelect, onScrollState }: P
     return () => window.removeEventListener("lc-jump-to-latest", handler);
   }, [jumpToLatest]);
 
-  // Progressive opacity: last 3 lines full, older lines fade
-  const getLineOpacity = (index: number) => {
-    const fromEnd = lines.length - 1 - index;
-    if (fromEnd < 3) return 1;
-    // Fade from 0.5 down to 0.2 for older lines
-    return Math.max(0.2, 0.5 - (fromEnd - 3) * 0.05);
-  };
 
   return (
     <>
@@ -157,7 +150,6 @@ export function SubtitleWindow({ onWordClick, onPhraseSelect, onScrollState }: P
                 lineHeight: "2.2",
                 fontSize: "14px",
                 color: "#e2e8f0",
-                opacity: getLineOpacity(i),
                 marginBottom: "2px",
                 flexWrap: "wrap",
                 display: "flex",
