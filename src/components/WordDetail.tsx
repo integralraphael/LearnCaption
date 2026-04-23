@@ -73,16 +73,15 @@ export function WordDetail({ word, context, isPhrase, onClose, onAddToVocab }: P
   };
 
   const handleAddToVocab = async () => {
-    if (!result) return;
     // Prefer AI translation (contextual) over ECDICT
-    const definition = aiTranslation ?? result.definition ?? "";
+    const definition = aiTranslation ?? result?.definition ?? "";
     try {
       const entry = await invoke<VocabEntry>("add_entry", {
         entry: word,
         definition,
-        entryType: "word",
+        entryType: isPhrase ? "phrase" : "word",
       });
-      setResult((prev) => prev ? { ...prev, vocabEntry: entry } : prev);
+      setResult((prev) => prev ? { ...prev, vocabEntry: entry } : { definition: null, vocabEntry: entry });
       onAddToVocab?.(entry);
     } catch (e) {
       console.error("add_entry failed:", e);
@@ -186,7 +185,7 @@ export function WordDetail({ word, context, isPhrase, onClose, onAddToVocab }: P
         >
           🔊 Pronounce
         </button>
-        {!isPhrase && !result?.vocabEntry && (
+        {!result?.vocabEntry && (
           <button
             onClick={handleAddToVocab}
             style={{ background: "#1e293b", border: "1px solid #334155", color: "#94a3b8", padding: "5px 12px", borderRadius: "6px", fontSize: "12px", cursor: "pointer" }}
@@ -194,7 +193,7 @@ export function WordDetail({ word, context, isPhrase, onClose, onAddToVocab }: P
             + Add to vocab
           </button>
         )}
-        {!isPhrase && result?.vocabEntry && result.vocabEntry.familiarity < 5 && (
+        {result?.vocabEntry && result.vocabEntry.familiarity < 5 && (
           <button
             onClick={handleMastered}
             style={{ background: "#064e3b", border: "none", color: "#34d399", padding: "5px 12px", borderRadius: "6px", fontSize: "12px", cursor: "pointer" }}
