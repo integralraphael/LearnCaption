@@ -7,6 +7,7 @@ import { SubtitleWindow, jumpSubtitleToLatest } from "./components/SubtitleWindo
 import { ScrollColumn } from "./components/ScrollColumn";
 import { WordDetail } from "./components/WordDetail";
 import { VocabCalibration } from "./components/VocabCalibration";
+import { openWordPopover, closeWordPopover } from "./components/WordPopover";
 
 type CaptureMode = "none" | "whisper" | "browser";
 
@@ -52,6 +53,13 @@ export default function App() {
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
+  const useBottomPanel = windowHeight >= 250;
+
+  // Close popover when switching to bottom panel mode
+  useEffect(() => {
+    if (useBottomPanel) closeWordPopover();
+  }, [useBottomPanel]);
+
   const handleStart = async (source: "whisper" | "browser") => {
     if (source === "whisper") {
       await invoke("start_recording");
@@ -75,20 +83,43 @@ export default function App() {
 
   const handleWordClick = (token: WordToken, sentenceText: string) => {
     const cleaned = token.text.replace(/^[^\w]+|[^\w]+$/g, "");
-    if (cleaned.length > 0) {
-      setClickedWord(cleaned.toLowerCase());
+    if (cleaned.length === 0) return;
+    const word = cleaned.toLowerCase();
+
+    if (useBottomPanel) {
+      setClickedWord(word);
       setClickedContext(sentenceText);
       setClickedIsPhrase(false);
+    } else {
+      // Get click position for popover placement
+      const selection = window.getSelection();
+      const range = selection?.getRangeAt(0);
+      const rect = range?.getBoundingClientRect();
+      openWordPopover({
+        word,
+        context: sentenceText,
+        isPhrase: false,
+        anchorX: rect?.left ?? 200,
+        anchorY: rect?.top ?? 0,
+      });
     }
   };
 
   const handlePhraseSelect = (phrase: string, ctx: string) => {
-    setClickedWord(phrase.toLowerCase());
-    setClickedContext(ctx);
-    setClickedIsPhrase(true);
+    if (useBottomPanel) {
+      setClickedWord(phrase.toLowerCase());
+      setClickedContext(ctx);
+      setClickedIsPhrase(true);
+    } else {
+      openWordPopover({
+        word: phrase.toLowerCase(),
+        context: ctx,
+        isPhrase: true,
+        anchorX: 200,
+        anchorY: 0,
+      });
+    }
   };
-
-  const useBottomPanel = windowHeight >= 250;
 
   // ── Vocab calibration ──
   if (modelReady && calibrated === false) {
@@ -181,7 +212,6 @@ export default function App() {
         onJumpToLatest={jumpSubtitleToLatest}
       />
 
-      {/* TODO Task 8: Popover window for short mode */}
     </div>
   );
 }
