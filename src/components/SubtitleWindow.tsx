@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { AnnotatedLine, WordToken } from "../types/subtitle";
@@ -28,9 +28,15 @@ export function SubtitleWindow({ onWordClick, onPhraseSelect, onScrollState }: P
       const incoming = e.payload;
       setLines((prev) => {
         switch (incoming.action) {
-          case "update":
+          case "update": {
             if (prev.length === 0) return [incoming];
-            return [...prev.slice(0, -1), incoming];
+            const last = prev[prev.length - 1];
+            // Preserve speaker from previous state if not present in partial update
+            const merged = incoming.speaker
+              ? incoming
+              : { ...incoming, speaker: last.speaker, speakerColor: last.speakerColor };
+            return [...prev.slice(0, -1), merged];
+          }
           case "new_block":
           case "append":
           default:
@@ -117,24 +123,7 @@ export function SubtitleWindow({ onWordClick, onPhraseSelect, onScrollState }: P
 
   return (
     <>
-      <style>{`
-        .lc-subtitle-area::-webkit-scrollbar { display: none; }
-        .lc-line[data-speaker]::before {
-          content: attr(data-speaker);
-          display: inline-block;
-          background: var(--speaker-color, #64748b);
-          color: #fff;
-          font-size: 11px;
-          font-weight: 600;
-          padding: 1px 6px;
-          border-radius: 4px;
-          margin-right: 6px;
-          line-height: 1.6;
-          flex-shrink: 0;
-          align-self: center;
-          user-select: none;
-        }
-      `}</style>
+      <style>{`.lc-subtitle-area::-webkit-scrollbar { display: none; }`}</style>
       <div
         ref={containerRef}
         className="lc-subtitle-area"
@@ -157,51 +146,72 @@ export function SubtitleWindow({ onWordClick, onPhraseSelect, onScrollState }: P
           </span>
         ) : (
           lines.map((line, i) => (
-            <React.Fragment key={line.lineId + "-" + i}>
             <div
-              className="lc-line"
+              key={line.lineId + "-" + i}
               data-raw-text={line.rawText}
-              {...(line.speaker ? { "data-speaker": line.speaker } : {})}
-              style={{
-                lineHeight: "2.2",
-                fontSize: "14px",
-                color: "#e2e8f0",
-                marginBottom: "2px",
-                flexWrap: "wrap",
-                display: "flex",
-                alignItems: "flex-start",
-                ...(line.speakerColor
-                  ? ({ "--speaker-color": line.speakerColor } as React.CSSProperties)
-                  : {}),
-              }}
+              style={{ display: "flex", alignItems: "flex-start", marginBottom: "4px" }}
             >
-              {(() => {
-                let vocabCount = 0;
-                return line.tokens.map((token, j) => {
-                  const vi = token.definition ? vocabCount++ : 0;
-                  return (
-                    <Token
-                      key={j}
-                      token={token}
-                      vocabIndex={vi}
-                      onClick={onWordClick ? (t) => onWordClick(t, line.rawText) : undefined}
-                    />
-                  );
-                });
-              })()}
-            </div>
-            {lineTranslations.get(line.lineId) && (
-              <div style={{
-                fontSize: "12px",
-                color: "#64748b",
-                lineHeight: "1.6",
-                marginBottom: "4px",
-                marginTop: "-2px",
-              }}>
-                {lineTranslations.get(line.lineId)}
+              {/* Speaker badge — own column */}
+              {line.speaker && (
+                <span style={{
+                  flexShrink: 0,
+                  alignSelf: "flex-start",
+                  marginTop: "6px",
+                  marginRight: "6px",
+                  background: line.speakerColor ?? "#64748b",
+                  color: "#fff",
+                  fontSize: "11px",
+                  fontWeight: 600,
+                  padding: "1px 6px",
+                  borderRadius: "4px",
+                  lineHeight: "1.6",
+                  userSelect: "none",
+                  whiteSpace: "nowrap",
+                }}>
+                  {line.speaker}
+                </span>
+              )}
+
+              {/* English tokens + Chinese translation, left-aligned together */}
+              <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+                <div
+                  className="lc-line"
+                  style={{
+                    lineHeight: "2.2",
+                    fontSize: "14px",
+                    color: "#e2e8f0",
+                    flexWrap: "wrap",
+                    display: "flex",
+                    alignItems: "flex-start",
+                  }}
+                >
+                  {(() => {
+                    let vocabCount = 0;
+                    return line.tokens.map((token, j) => {
+                      const vi = token.definition ? vocabCount++ : 0;
+                      return (
+                        <Token
+                          key={j}
+                          token={token}
+                          vocabIndex={vi}
+                          onClick={onWordClick ? (t) => onWordClick(t, line.rawText) : undefined}
+                        />
+                      );
+                    });
+                  })()}
+                </div>
+                {lineTranslations.get(line.lineId) && (
+                  <div style={{
+                    fontSize: "12px",
+                    color: "#64748b",
+                    lineHeight: "1.6",
+                    marginTop: "-4px",
+                  }}>
+                    {lineTranslations.get(line.lineId)}
+                  </div>
+                )}
               </div>
-            )}
-            </React.Fragment>
+            </div>
           ))
         )}
       </div>
