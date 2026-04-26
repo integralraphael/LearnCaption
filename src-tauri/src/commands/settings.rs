@@ -2,6 +2,7 @@ use serde::Serialize;
 use std::sync::Arc;
 use tauri::State;
 
+use crate::commands::pipeline::PipelineState;
 use crate::db::AppDb;
 use crate::dictionary::EcdictDictionary;
 
@@ -51,6 +52,35 @@ pub fn get_calibration_words(
 #[tauri::command]
 pub fn get_dict_total(dict: State<'_, Arc<EcdictDictionary>>) -> u32 {
     dict.total_words()
+}
+
+/// Update the live annotator's frq threshold and auto-translate flag without restarting capture.
+/// Also persists both values to the settings table.
+#[tauri::command]
+pub fn set_annotator_config(
+    frq_threshold: u32,
+    auto_translate: bool,
+    db: State<'_, AppDb>,
+    pipeline: State<'_, PipelineState>,
+) -> Result<(), String> {
+    // Persist to DB
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES ('ai_translate_frq_threshold', ?1)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        rusqlite::params![frq_threshold.to_string()],
+    ).map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES ('auto_translate', ?1)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        rusqlite::params![if auto_translate { "true" } else { "false" }],
+    ).map_err(|e| e.to_string())?;
+    drop(conn);
+    // Update live annotator if a capture session is running
+    if let Some(ann) = pipeline.annotator.lock().unwrap().as_ref() {
+        ann.lock().unwrap().set_config(frq_threshold, auto_translate);
+    }
+    Ok(())
 }
 
 #[tauri::command]

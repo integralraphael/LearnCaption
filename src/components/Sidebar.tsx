@@ -338,6 +338,15 @@ export function Sidebar({ captureMode, onStart, onPause, onStop, onRecalibrate, 
               <Toggle on={displayConfig.sentenceTranslation} />
             </div>
 
+            <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", marginTop: "2px", paddingTop: "6px" }}>
+              <div style={panelHeader}>自动标注</div>
+            </div>
+            <div onClick={() => onDisplayChange({ autoTranslate: !displayConfig.autoTranslate })}
+              style={{ ...settingsItem, justifyContent: "space-between" }}>
+              <span style={{ color: "#94a3b8", fontSize: "11px" }}>超纲词注释</span>
+              <Toggle on={displayConfig.autoTranslate} />
+            </div>
+
             <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", marginTop: "2px", paddingTop: "6px" }} />
 
             <div onClick={onRecalibrate} style={settingsItem}>

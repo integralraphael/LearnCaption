@@ -11,6 +11,8 @@ export interface DisplayConfig {
   colorHard: string;    // backend "red" tier
   translationPosition: TranslationPosition;
   sentenceTranslation: boolean;
+  /** Auto-annotate hard words (frq > calibration threshold) with ECDICT definitions inline */
+  autoTranslate: boolean;
 }
 
 export const defaultDisplayConfig: DisplayConfig = {
@@ -21,6 +23,7 @@ export const defaultDisplayConfig: DisplayConfig = {
   colorHard: "#ef4444",
   translationPosition: "inline_bracket",
   sentenceTranslation: false,
+  autoTranslate: false,
 };
 
 export const DB_KEY_MAP: Record<keyof DisplayConfig, string> = {
@@ -31,6 +34,7 @@ export const DB_KEY_MAP: Record<keyof DisplayConfig, string> = {
   colorHard: "display_color_hard",
   translationPosition: "display_translation_position",
   sentenceTranslation: "display_sentence_translation",
+  autoTranslate: "auto_translate",
 };
 
 export const PRESET_COLORS = [

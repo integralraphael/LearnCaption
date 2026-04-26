@@ -43,6 +43,11 @@ pub struct Annotator {
     dict: std::sync::Arc<crate::dictionary::EcdictDictionary>,
     automaton: Option<AhoCorasick>,
     vocab_entries: Vec<VocabEntry>,
+    /// Frequency rank threshold loaded from user calibration (ai_translate_frq_threshold).
+    /// Words with frq > this are considered "difficult".
+    frq_threshold: u32,
+    /// When true, hard words not in the vocab book are auto-annotated with their ECDICT definition.
+    auto_translate: bool,
 }
 
 impl Annotator {
@@ -51,7 +56,15 @@ impl Annotator {
             dict,
             automaton: None,
             vocab_entries: vec![],
+            frq_threshold: 3000,
+            auto_translate: false,
         }
+    }
+
+    /// Update dynamic config. Call after loading user settings or when the user changes them.
+    pub fn set_config(&mut self, frq_threshold: u32, auto_translate: bool) {
+        self.frq_threshold = frq_threshold;
+        self.auto_translate = auto_translate;
     }
 
     /// Rebuild the Aho-Corasick automaton from the current vocabulary entries.
@@ -151,9 +164,22 @@ impl Annotator {
                 }
             } else {
                 let word_text = &raw[wstart.._wend];
+                // Auto-translate: look up hard words (frq > threshold) not in vocab book.
+                // No color — auto-annotated words are visually distinct from vocab-book words.
+                let auto_def = if self.auto_translate {
+                    let clean = word_text.trim_matches(|c: char| !c.is_alphabetic());
+                    if !clean.is_empty() {
+                        self.dict.lookup_if_difficult(clean, self.frq_threshold)
+                            .map(|s| s.to_string())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
                 tokens.push(WordToken {
                     text: word_text.to_string(),
-                    definition: None,
+                    definition: auto_def,
                     vocab_id: None,
                     color: None,
                 });

@@ -19,6 +19,22 @@ pub fn open_app_db(app: &AppHandle) -> rusqlite::Result<AppDb> {
     Ok(Arc::new(Mutex::new(conn)))
 }
 
+/// Load annotator config (frq threshold + auto-translate flag) from settings table.
+pub fn load_annotator_config(db: &AppDb) -> (u32, bool) {
+    let conn = db.lock().unwrap();
+    let threshold = conn
+        .query_row("SELECT value FROM settings WHERE key='ai_translate_frq_threshold'", [], |r| r.get::<_, String>(0))
+        .ok()
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(3000);
+    let auto_translate = conn
+        .query_row("SELECT value FROM settings WHERE key='auto_translate'", [], |r| r.get::<_, String>(0))
+        .ok()
+        .map(|s| s == "true")
+        .unwrap_or(false);
+    (threshold, auto_translate)
+}
+
 /// Load vocab entries from DB for building the Aho-Corasick automaton.
 pub fn load_vocab_entries(db: &AppDb) -> rusqlite::Result<Vec<crate::pipeline::VocabEntry>> {
     let conn = db.lock().unwrap();

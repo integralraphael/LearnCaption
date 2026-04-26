@@ -73,6 +73,7 @@ pub fn run() {
             commands::translate::translate_selection,
             commands::settings::get_setting,
             commands::settings::set_setting,
+            commands::settings::set_annotator_config,
             commands::settings::get_calibration_words,
             commands::settings::get_dict_total,
             commands::settings::toggle_always_on_top,

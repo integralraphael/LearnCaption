@@ -99,6 +99,40 @@ impl EcdictDictionary {
         }
     }
 
+    /// Look up a word's definition only if its frequency rank exceeds `threshold`
+    /// (i.e. it's a "difficult" word by the user's calibration). Also tries Snowball
+    /// stemming. Returns None if the word is too common or not in the dictionary.
+    pub fn lookup_if_difficult<'a>(&'a self, word: &str, threshold: u32) -> Option<&'a str> {
+        let lower = word.to_lowercase();
+        if let Some(e) = self.entries.get(&lower) {
+            return if e.frq > threshold {
+                Some(e.translation.lines().next().unwrap_or(&e.translation))
+            } else {
+                None // found but too common
+            };
+        }
+        // Snowball stem fallback
+        let stemmed = self.stemmer.stem(&lower).to_string();
+        if stemmed != lower {
+            if let Some(e) = self.entries.get(&stemmed) {
+                return if e.frq > threshold {
+                    Some(e.translation.lines().next().unwrap_or(&e.translation))
+                } else {
+                    None
+                };
+            }
+            let stem_e = format!("{stemmed}e");
+            if let Some(e) = self.entries.get(&stem_e) {
+                return if e.frq > threshold {
+                    Some(e.translation.lines().next().unwrap_or(&e.translation))
+                } else {
+                    None
+                };
+            }
+        }
+        None
+    }
+
     /// Look up translation + difficulty for auto-vocab.
     /// Tries exact match first, then Snowball stem, all validated against dict.
     /// Returns (base_word, definition, is_difficult).

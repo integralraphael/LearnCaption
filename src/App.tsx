@@ -51,8 +51,9 @@ export default function App() {
       const updates: Partial<DisplayConfig> = {};
       for (const [field, value] of entries) {
         if (value !== null) {
+          const boolFields: (keyof DisplayConfig)[] = ["sentenceTranslation", "autoTranslate"];
           (updates as Record<string, unknown>)[field] =
-            field === "sentenceTranslation" ? value === "true" : value;
+            boolFields.includes(field) ? value === "true" : value;
         }
       }
       setDisplayConfig((prev) => ({ ...prev, ...updates }));
@@ -102,10 +103,17 @@ export default function App() {
   };
 
   const handleDisplayChange = async (updates: Partial<DisplayConfig>) => {
+    const next = { ...displayConfig, ...updates };
     for (const [key, value] of Object.entries(updates) as [keyof DisplayConfig, unknown][]) {
       await invoke("set_setting", { key: DB_KEY_MAP[key], value: String(value) });
     }
-    setDisplayConfig((prev) => ({ ...prev, ...updates }));
+    // If autoTranslate toggled, sync the live annotator config
+    if ("autoTranslate" in updates) {
+      const thresholdStr = await invoke<string | null>("get_setting", { key: "ai_translate_frq_threshold" });
+      const frqThreshold = parseInt(thresholdStr ?? "3000", 10);
+      await invoke("set_annotator_config", { frqThreshold, autoTranslate: next.autoTranslate });
+    }
+    setDisplayConfig(next);
   };
 
   const handleWordClick = (token: WordToken, sentenceText: string) => {

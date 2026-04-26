@@ -3,7 +3,7 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::caption_source::{ws_server, CaptionPipeline};
 use crate::commands::pipeline::PipelineState;
-use crate::db::{load_vocab_entries, AppDb};
+use crate::db::{load_annotator_config, load_vocab_entries, AppDb};
 use crate::dictionary::EcdictDictionary;
 use crate::pipeline::Annotator;
 
@@ -27,8 +27,10 @@ pub async fn start_browser_capture(
     let listener = ws_server::bind().await?;
 
     let vocab_entries = load_vocab_entries(&db).map_err(|e| e.to_string())?;
+    let (frq_threshold, auto_translate) = load_annotator_config(&db);
     let mut annotator = Annotator::new(dict.inner().clone());
     annotator.rebuild_automaton(vocab_entries);
+    annotator.set_config(frq_threshold, auto_translate);
     let annotator = Arc::new(Mutex::new(annotator));
     *state.annotator.lock().unwrap() = Some(Arc::clone(&annotator));
 

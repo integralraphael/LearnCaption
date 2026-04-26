@@ -47,6 +47,7 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
 
         -- Default settings (INSERT OR IGNORE so they're only set once)
         INSERT OR IGNORE INTO settings (key, value) VALUES ('ai_translate_frq_threshold', '3000');
+        INSERT OR IGNORE INTO settings (key, value) VALUES ('auto_translate', 'false');
 
         CREATE INDEX IF NOT EXISTS idx_vocab_sentences_vocab_id
             ON vocab_sentences(vocab_id);

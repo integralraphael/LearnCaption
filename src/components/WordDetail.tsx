@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { VocabEntry, WordQueryResult, VocabSentence } from "../types/vocabulary";
@@ -12,85 +12,105 @@ interface Props {
 }
 
 export function WordDetail({ word, context, isPhrase, onClose, onAddToVocab }: Props) {
-  const [result, setResult] = useState<WordQueryResult | null>(null);
+  const [ecdictResult, setEcdictResult] = useState<WordQueryResult | null>(null);
   const [sentences, setSentences] = useState<VocabSentence[]>([]);
-  const [aiTranslation, setAiTranslation] = useState<string | null>(null);
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiError, setAiError] = useState<string | null>(null);
+  // Best translation shown to the user — shorter of ECDICT and AI for words,
+  // AI only for phrases.
+  const [translation, setTranslation] = useState<string | null>(null);
+  const [translating, setTranslating] = useState(false);
   const [modelMissing, setModelMissing] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
+  // Cache threshold across word changes (fetched once per component mount)
+  const thresholdRef = useRef<number>(3000);
 
-  const triggerAiTranslate = async (ecdictFallback?: string | null) => {
-    setAiLoading(true);
-    setAiError(null);
-    setAiTranslation(null);
-    try {
-      const translation = await invoke<string>("translate_selection", {
-        selection: word,
-        context: context ?? null,
-      });
-      setAiTranslation(translation);
-    } catch (e: unknown) {
-      const msg = String(e);
-      if (msg.includes("MODEL_NOT_DOWNLOADED")) {
-        setModelMissing(true);
-      } else if (msg.includes("AI_OUTPUT_TOO_LONG") && ecdictFallback) {
-        // Model translated entire sentence — fall back to ECDICT definition
-        setAiTranslation(ecdictFallback);
-      } else {
-        setAiError(msg);
-      }
-    } finally {
-      setAiLoading(false);
-    }
-  };
+  useEffect(() => {
+    invoke<string | null>("get_setting", { key: "ai_translate_frq_threshold" })
+      .then((v) => { thresholdRef.current = parseInt(v ?? "3000", 10); })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     setSentences([]);
-    setAiTranslation(null);
-    setAiError(null);
+    setEcdictResult(null);
+    setTranslation(null);
+    setTranslating(false);
     setModelMissing(false);
 
-    if (!isPhrase) {
-      // Single word: query ECDICT, then decide whether to trigger AI
-      invoke<WordQueryResult>("query_word", { word }).then(async (r) => {
-        setResult(r);
-        // Skip AI for common words (frq below threshold)
-        const thresholdStr = await invoke<string | null>("get_setting", { key: "ai_translate_frq_threshold" });
-        const threshold = parseInt(thresholdStr ?? "3000", 10);
-        if (r.frequency != null && r.frequency < threshold) return;
-        triggerAiTranslate(r.definition);
-      }).catch(console.error);
-    } else {
-      setResult(null);
-      // Phrases always get AI translation
-      triggerAiTranslate();
+    let cancelled = false;
+
+    if (isPhrase) {
+      // Phrases and sentences: AI only
+      setTranslating(true);
+      invoke<string>("translate_selection", { selection: word, context: context ?? null })
+        .then((t) => { if (!cancelled) setTranslation(t); })
+        .catch((e) => {
+          if (cancelled) return;
+          if (String(e).includes("MODEL_NOT_DOWNLOADED")) setModelMissing(true);
+        })
+        .finally(() => { if (!cancelled) setTranslating(false); });
+      return () => { cancelled = true; };
     }
+
+    // Single word: ECDICT + AI concurrently, show shorter of the two valid results.
+    //
+    // TODO: AI models tend to translate simple words — especially those appearing at the
+    // start of a sentence — as the full sentence rather than the word itself. Taking the
+    // shorter of ECDICT and AI avoids showing these over-translated results.
+    invoke<WordQueryResult>("query_word", { word }).then((r) => {
+      if (cancelled) return;
+      setEcdictResult(r);
+
+      // Show ECDICT definition immediately while AI runs (or if AI isn't triggered)
+      if (r.definition) setTranslation(r.definition);
+
+      // Skip AI for common words (frq below user's calibrated threshold)
+      if (r.frequency != null && r.frequency < thresholdRef.current) return;
+
+      // Fire AI translation
+      setTranslating(true);
+      invoke<string>("translate_selection", { selection: word, context: context ?? null })
+        .then((ai) => {
+          if (cancelled) return;
+          const ecdict = r.definition ?? null;
+          // Keep whichever valid result is shorter
+          const useAI = !ecdict || ai.length < ecdict.length;
+          setTranslation(useAI ? ai : ecdict);
+        })
+        .catch((e) => {
+          if (cancelled) return;
+          if (String(e).includes("MODEL_NOT_DOWNLOADED")) setModelMissing(true);
+          // keep ECDICT result on AI failure — already set above
+        })
+        .finally(() => { if (!cancelled) setTranslating(false); });
+    }).catch(console.error);
+
+    return () => { cancelled = true; };
   }, [word]);
 
   useEffect(() => {
-    if (result?.vocabEntry) {
-      invoke<VocabSentence[]>("get_vocab_sentences", { vocabId: result.vocabEntry.id })
+    if (ecdictResult?.vocabEntry) {
+      invoke<VocabSentence[]>("get_vocab_sentences", { vocabId: ecdictResult.vocabEntry.id })
         .then(setSentences)
         .catch(console.error);
     }
-  }, [result]);
+  }, [ecdictResult]);
 
   const handleSpeak = (text: string) => {
     invoke("speak_text", { text }).catch(console.error);
   };
 
   const handleAddToVocab = async () => {
-    // Prefer AI translation (contextual) over ECDICT
-    const definition = aiTranslation ?? result?.definition ?? "";
+    const definition = translation ?? ecdictResult?.definition ?? "";
     try {
       const entry = await invoke<VocabEntry>("add_entry", {
         entry: word,
         definition,
         entryType: isPhrase ? "phrase" : "word",
       });
-      setResult((prev) => prev ? { ...prev, vocabEntry: entry } : { definition: null, frequency: null, vocabEntry: entry });
+      setEcdictResult((prev) =>
+        prev ? { ...prev, vocabEntry: entry } : { definition: null, frequency: null, vocabEntry: entry }
+      );
       onAddToVocab?.(entry);
     } catch (e) {
       console.error("add_entry failed:", e);
@@ -98,8 +118,8 @@ export function WordDetail({ word, context, isPhrase, onClose, onAddToVocab }: P
   };
 
   const handleMastered = async () => {
-    if (!result?.vocabEntry) return;
-    await invoke("mark_mastered", { id: result.vocabEntry.id });
+    if (!ecdictResult?.vocabEntry) return;
+    await invoke("mark_mastered", { id: ecdictResult.vocabEntry.id });
     onClose();
   };
 
@@ -114,8 +134,8 @@ export function WordDetail({ word, context, isPhrase, onClose, onAddToVocab }: P
     });
     const u3 = await listen<string>("hymt-download-error", (e) => {
       setDownloading(false);
-      setAiError(`下载失败: ${e.payload}`);
       u1(); u2(); u3();
+      console.error("download error:", e.payload);
     });
     await invoke("download_translation_model");
   };
@@ -133,9 +153,9 @@ export function WordDetail({ word, context, isPhrase, onClose, onAddToVocab }: P
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
         <div>
           <span style={{ color: "#fbbf24", fontSize: "20px", fontWeight: 700 }}>{word}</span>
-          {result?.vocabEntry && (
+          {ecdictResult?.vocabEntry && (
             <span style={{ color: "#34d399", fontSize: "12px", marginLeft: "10px" }}>
-              {result.vocabEntry.occurrenceCount}×
+              {ecdictResult.vocabEntry.occurrenceCount}×
             </span>
           )}
         </div>
@@ -147,25 +167,20 @@ export function WordDetail({ word, context, isPhrase, onClose, onAddToVocab }: P
         </button>
       </div>
 
-      {/* ECDICT definition — single words only */}
-      {!isPhrase && result?.definition && (
-        <div style={{ marginTop: "8px", borderRadius: "6px", padding: "8px 12px", minHeight: "28px" }}>
-          <span style={{ color: "#64748b", fontSize: "11px", fontWeight: 600, marginRight: "8px" }}>ECDICT 翻译</span>
-          <span style={{ color: "#94a3b8", fontSize: "14px", lineHeight: "1.6" }}>{result.definition}</span>
-        </div>
-      )}
-
-      {/* AI translation */}
-      <div style={{ marginTop: "4px", background: "#1e1b4b", borderRadius: "6px", padding: "8px 12px", minHeight: "28px" }}>
-        <span style={{ color: "#6366f1", fontSize: "11px", fontWeight: 600, marginRight: "8px" }}>AI 翻译</span>
-        {aiLoading && <span style={{ color: "#6366f1", fontSize: "14px" }}>翻译中…</span>}
-        {aiTranslation && (
-          <span style={{ color: "#c7d2fe", fontSize: "14px", lineHeight: "1.6" }}>{aiTranslation}</span>
+      {/* Translation — best of ECDICT / AI */}
+      <div style={{ marginTop: "8px", background: "#1e293b", borderRadius: "6px", padding: "8px 12px", minHeight: "28px" }}>
+        {translation && (
+          <span style={{ color: "#cbd5e1", fontSize: "14px", lineHeight: "1.6" }}>{translation}</span>
         )}
-        {aiError && <span style={{ color: "#f87171", fontSize: "14px" }}>{aiError}</span>}
+        {translating && !translation && (
+          <span style={{ color: "#64748b", fontSize: "14px" }}>翻译中…</span>
+        )}
+        {translating && translation && (
+          <span style={{ color: "#475569", fontSize: "11px", marginLeft: "8px" }}>AI…</span>
+        )}
         {modelMissing && !downloading && (
           <span style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
-            <span style={{ color: "#94a3b8", fontSize: "14px" }}>模型未下载 (~1.1 GB)</span>
+            <span style={{ color: "#94a3b8", fontSize: "14px" }}>AI 模型未下载 (~1.1 GB)</span>
             <button
               onClick={handleDownloadModel}
               style={{ background: "#312e81", border: "none", color: "#a5b4fc", padding: "3px 10px", borderRadius: "5px", fontSize: "12px", cursor: "pointer" }}
@@ -179,7 +194,7 @@ export function WordDetail({ word, context, isPhrase, onClose, onAddToVocab }: P
             <div style={{ color: "#a5b4fc", fontSize: "13px", marginBottom: "4px" }}>
               下载中… {Math.round(downloadProgress * 100)}%
             </div>
-            <div style={{ background: "#1e1b4b", borderRadius: "4px", height: "4px", width: "100%" }}>
+            <div style={{ background: "#0f172a", borderRadius: "4px", height: "4px", width: "100%" }}>
               <div style={{ background: "#6366f1", height: "4px", borderRadius: "4px", width: `${downloadProgress * 100}%`, transition: "width 0.3s" }} />
             </div>
           </div>
@@ -194,7 +209,7 @@ export function WordDetail({ word, context, isPhrase, onClose, onAddToVocab }: P
         >
           🔊 Pronounce
         </button>
-        {!result?.vocabEntry && (
+        {!ecdictResult?.vocabEntry && (
           <button
             onClick={handleAddToVocab}
             style={{ background: "#1e293b", border: "1px solid #334155", color: "#94a3b8", padding: "5px 12px", borderRadius: "6px", fontSize: "12px", cursor: "pointer" }}
@@ -202,7 +217,7 @@ export function WordDetail({ word, context, isPhrase, onClose, onAddToVocab }: P
             + Add to vocab
           </button>
         )}
-        {result?.vocabEntry && result.vocabEntry.familiarity < 5 && (
+        {ecdictResult?.vocabEntry && ecdictResult.vocabEntry.familiarity < 5 && (
           <button
             onClick={handleMastered}
             style={{ background: "#064e3b", border: "none", color: "#34d399", padding: "5px 12px", borderRadius: "6px", fontSize: "12px", cursor: "pointer" }}
