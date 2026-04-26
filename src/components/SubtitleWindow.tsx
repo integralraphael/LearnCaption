@@ -1,9 +1,92 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { AnnotatedLine, WordToken } from "../types/subtitle";
 import { Token } from "./Token";
 import { useDisplaySettings } from "../contexts/DisplaySettings";
+
+// ── 2-track below-stagger layout ────────────────────────────────────────────
+// Renders the token row for one subtitle line.
+// In below_stagger mode, translations are positioned via useLayoutEffect
+// using a greedy 2-row algorithm: try row 0, fall back to row 1 if overlap,
+// never introduce a third row.
+interface SubtitleLineProps {
+  tokens: AnnotatedLine["tokens"];
+  rawText: string;
+  onWordClick?: (token: WordToken, rawText: string) => void;
+}
+
+function SubtitleLine({ tokens, rawText, onWordClick }: SubtitleLineProps) {
+  const ref = useRef<HTMLDivElement>(null);
+  const config = useDisplaySettings();
+  const isStagger = config.translationPosition === "below_stagger";
+  const hasVocab = tokens.some((t) => t.definition);
+
+  useLayoutEffect(() => {
+    if (!isStagger || !ref.current) return;
+    const el = ref.current;
+    const lineRect = el.getBoundingClientRect();
+    // right edge (relative to line left) of the last translation placed in each row
+    const rowRightEdge = [0, 0];
+    // px from token bottom to top of each row; row 1 sits one translated-text-line lower
+    const ROW_OFFSET = [2, 15]; // row0: 2px gap, row1: 2px + ~13px line height
+
+    const vocabTokenEls = Array.from(el.querySelectorAll<HTMLElement>("[data-vocab-idx]"));
+    vocabTokenEls.forEach((tokenEl) => {
+      const idx = tokenEl.getAttribute("data-vocab-idx");
+      const transEl = el.querySelector<HTMLElement>(`[data-trans-idx="${idx}"]`);
+      if (!transEl) return;
+
+      const tokenX = tokenEl.getBoundingClientRect().left - lineRect.left;
+      const transW = transEl.getBoundingClientRect().width;
+
+      // Try row 0 first, then row 1
+      let chosenRow = -1;
+      for (const r of [0, 1]) {
+        if (tokenX >= rowRightEdge[r]) { chosenRow = r; break; }
+      }
+      // Both rows overlap — pick the one that frees up sooner (smaller right edge)
+      if (chosenRow === -1) {
+        chosenRow = rowRightEdge[0] <= rowRightEdge[1] ? 0 : 1;
+      }
+
+      rowRightEdge[chosenRow] = tokenX + transW + 4; // 4px gap between translations
+      transEl.style.top = `calc(100% + ${ROW_OFFSET[chosenRow]}px)`;
+      transEl.style.visibility = "visible";
+    });
+  });
+
+  let vocabCount = 0;
+  return (
+    <div
+      ref={ref}
+      className="lc-line"
+      style={{
+        lineHeight: "2.2",
+        fontSize: "14px",
+        color: "#e2e8f0",
+        flexWrap: "wrap",
+        display: "flex",
+        alignItems: "flex-start",
+        // Reserve space for up to 2 translation rows beneath the English text
+        paddingBottom: isStagger && hasVocab ? "30px" : undefined,
+      }}
+    >
+      {tokens.map((token, j) => {
+        const vi = token.definition ? vocabCount++ : 0;
+        return (
+          <Token
+            key={j}
+            token={token}
+            vocabIndex={vi}
+            onClick={onWordClick ? (t) => onWordClick(t, rawText) : undefined}
+          />
+        );
+      })}
+    </div>
+  );
+}
+// ────────────────────────────────────────────────────────────────────────────
 
 interface Props {
   onWordClick?: (token: WordToken, sentenceText: string) => void;
@@ -174,32 +257,11 @@ export function SubtitleWindow({ onWordClick, onPhraseSelect, onScrollState }: P
 
               {/* English tokens + Chinese translation, left-aligned together */}
               <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
-                <div
-                  className="lc-line"
-                  style={{
-                    lineHeight: "2.2",
-                    fontSize: "14px",
-                    color: "#e2e8f0",
-                    flexWrap: "wrap",
-                    display: "flex",
-                    alignItems: "flex-start",
-                  }}
-                >
-                  {(() => {
-                    let vocabCount = 0;
-                    return line.tokens.map((token, j) => {
-                      const vi = token.definition ? vocabCount++ : 0;
-                      return (
-                        <Token
-                          key={j}
-                          token={token}
-                          vocabIndex={vi}
-                          onClick={onWordClick ? (t) => onWordClick(t, line.rawText) : undefined}
-                        />
-                      );
-                    });
-                  })()}
-                </div>
+                <SubtitleLine
+                  tokens={line.tokens}
+                  rawText={line.rawText}
+                  onWordClick={onWordClick}
+                />
                 {lineTranslations.get(line.lineId) && (
                   <div style={{
                     fontSize: "12px",

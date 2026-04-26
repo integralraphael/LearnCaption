@@ -21,7 +21,6 @@ export function Token({ token, onClick, vocabIndex = 0 }: Props) {
   const color = getColor();
   const pos = config.translationPosition;
   const isStagger = pos === "below_stagger";
-  const staggerOffset = isStagger ? (vocabIndex % 2) * 16 : 0;
 
   return (
     <span
@@ -31,13 +30,13 @@ export function Token({ token, onClick, vocabIndex = 0 }: Props) {
         display: isStagger ? "inline-block" : "inline",
         marginRight: "3px",
         cursor: onClick ? "pointer" : "default",
-        // Extra bottom padding so staggered labels don't overlap next line
-        paddingBottom: isStagger && token.definition
-          ? `${staggerOffset + 16}px`
-          : undefined,
       }}
     >
-      <span style={{ color: color ?? "inherit", fontWeight: color ? 600 : "normal" }}>
+      {/* data-vocab-idx marks this as a measurable vocab token for the 2-track layout */}
+      <span
+        data-vocab-idx={isStagger && token.definition ? vocabIndex : undefined}
+        style={{ color: color ?? "inherit", fontWeight: color ? 600 : "normal" }}
+      >
         {token.text}
       </span>
 
@@ -51,17 +50,21 @@ export function Token({ token, onClick, vocabIndex = 0 }: Props) {
             [{token.definition}]
           </span>
         ) : (
-          // below_stagger: absolute, alternating offsets
-          <span style={{
-            position: "absolute",
-            left: 0,
-            top: `calc(100% + ${staggerOffset}px)`,
-            fontSize: "0.65em",
-            color: color ?? "#94a3b8",
-            lineHeight: "1.2",
-            whiteSpace: "nowrap",
-            pointerEvents: "none",
-          }}>
+          // below_stagger: parent SubtitleLine positions via useLayoutEffect (2-track algorithm)
+          <span
+            data-trans-idx={vocabIndex}
+            style={{
+              position: "absolute",
+              left: 0,
+              top: "calc(100% + 2px)", // overridden by SubtitleLine's useLayoutEffect
+              fontSize: "0.65em",
+              color: color ?? "#94a3b8",
+              lineHeight: "1.2",
+              whiteSpace: "nowrap",
+              pointerEvents: "none",
+              visibility: "hidden", // shown after positioning to prevent flash
+            }}
+          >
             {token.definition}
           </span>
         )
