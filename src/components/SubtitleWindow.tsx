@@ -20,18 +20,26 @@ function SubtitleLine({ tokens, rawText, onWordClick }: SubtitleLineProps) {
   const ref = useRef<HTMLDivElement>(null);
   const config = useDisplaySettings();
   const isStagger = config.translationPosition === "below_stagger";
-  const hasVocab = tokens.some((t) => t.definition);
 
   useLayoutEffect(() => {
-    if (!isStagger || !ref.current) return;
+    if (!ref.current) return;
     const el = ref.current;
-    const lineRect = el.getBoundingClientRect();
-    // right edge (relative to line left) of the last translation placed in each row
-    const rowRightEdge = [0, 0];
-    // px from token bottom to top of each row; row 1 sits one translated-text-line lower
-    const ROW_OFFSET = [2, 15]; // row0: 2px gap, row1: 2px + ~13px line height
+
+    if (!isStagger) return;
 
     const vocabTokenEls = Array.from(el.querySelectorAll<HTMLElement>("[data-vocab-idx]"));
+    if (vocabTokenEls.length === 0) {
+      el.style.paddingBottom = "";
+      return;
+    }
+
+    const lineRect = el.getBoundingClientRect();
+    // right edge (relative to line left) of last translation placed in each row
+    const rowRightEdge = [0, 0];
+    // px from token bottom to top of each row
+    const ROW_OFFSET = [2, 15]; // row0: 2px gap, row1: 2px + ~13px line height
+    let maxRowUsed = 0;
+
     vocabTokenEls.forEach((tokenEl) => {
       const idx = tokenEl.getAttribute("data-vocab-idx");
       const transEl = el.querySelector<HTMLElement>(`[data-trans-idx="${idx}"]`);
@@ -46,14 +54,16 @@ function SubtitleLine({ tokens, rawText, onWordClick }: SubtitleLineProps) {
         if (tokenX >= rowRightEdge[r]) { chosenRow = r; break; }
       }
       // Both rows overlap — pick the one that frees up sooner (smaller right edge)
-      if (chosenRow === -1) {
-        chosenRow = rowRightEdge[0] <= rowRightEdge[1] ? 0 : 1;
-      }
+      if (chosenRow === -1) chosenRow = rowRightEdge[0] <= rowRightEdge[1] ? 0 : 1;
 
-      rowRightEdge[chosenRow] = tokenX + transW + 4; // 4px gap between translations
+      rowRightEdge[chosenRow] = tokenX + transW + 4;
+      if (chosenRow > maxRowUsed) maxRowUsed = chosenRow;
       transEl.style.top = `calc(100% + ${ROW_OFFSET[chosenRow]}px)`;
       transEl.style.visibility = "visible";
     });
+
+    // Reserve only as much space as actually used: 1 row ≈ 16px, 2 rows ≈ 30px
+    el.style.paddingBottom = maxRowUsed === 0 ? "16px" : "30px";
   });
 
   let vocabCount = 0;
@@ -68,8 +78,7 @@ function SubtitleLine({ tokens, rawText, onWordClick }: SubtitleLineProps) {
         flexWrap: "wrap",
         display: "flex",
         alignItems: "flex-start",
-        // Reserve space for up to 2 translation rows beneath the English text
-        paddingBottom: isStagger && hasVocab ? "30px" : undefined,
+        // paddingBottom set dynamically by useLayoutEffect based on rows actually used
       }}
     >
       {tokens.map((token, j) => {
@@ -98,7 +107,11 @@ interface Props {
 export function SubtitleWindow({ onWordClick, onPhraseSelect, onScrollState }: Props) {
   const [lines, setLines] = useState<AnnotatedLine[]>([]);
   const [lineTranslations, setLineTranslations] = useState<Map<number, string>>(new Map());
+  // Overrides for auto-translated token definitions (ECDICT replaced by shorter AI result)
+  // Key: `${lineId}-${tokenIdx}`
+  const [tokenOverrides, setTokenOverrides] = useState<Map<string, string>>(new Map());
   const translatedIdsRef = useRef<Set<number>>(new Set());
+  const translatedTokensRef = useRef<Set<string>>(new Set());
   const containerRef = useRef<HTMLDivElement>(null);
   const autoFollowRef = useRef(true);
   const config = useDisplaySettings();
@@ -151,6 +164,31 @@ export function SubtitleWindow({ onWordClick, onPhraseSelect, onScrollState }: P
       .then((t) => setLineTranslations((prev) => new Map(prev).set(prevLine.lineId, t)))
       .catch(() => {}); // silently ignore (model not downloaded etc.)
   }, [lines.length, config.sentenceTranslation]);
+
+  // Auto-translate AI refinement: for tokens annotated from ECDICT (not vocab book),
+  // fire AI translation concurrently and replace with the shorter result.
+  // Runs on the previously finalized line (same timing as sentence translation).
+  useEffect(() => {
+    if (lines.length < 2) return;
+    const prevLine = lines[lines.length - 2];
+    prevLine.tokens.forEach((token, tokenIdx) => {
+      // Auto-translated token: has ECDICT definition but no vocab book color/id
+      if (!token.definition || token.color !== null || token.vocabId !== null) return;
+      const key = `${prevLine.lineId}-${tokenIdx}`;
+      if (translatedTokensRef.current.has(key)) return;
+      translatedTokensRef.current.add(key);
+      const ecdict = token.definition;
+      const word = token.text.replace(/[^a-zA-Z'-]/g, "");
+      if (!word) return;
+      invoke<string>("translate_selection", { selection: word, context: prevLine.rawText })
+        .then((ai) => {
+          if (ai.length < ecdict.length) {
+            setTokenOverrides((prev) => new Map(prev).set(key, ai));
+          }
+        })
+        .catch(() => {}); // silently ignore
+    });
+  }, [lines.length]);
 
   const reportScroll = useCallback(() => {
     const el = containerRef.current;
@@ -258,7 +296,11 @@ export function SubtitleWindow({ onWordClick, onPhraseSelect, onScrollState }: P
               {/* English tokens + Chinese translation, left-aligned together */}
               <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
                 <SubtitleLine
-                  tokens={line.tokens}
+                  tokens={line.tokens.map((t, idx) => {
+                    if (!t.definition || t.color !== null || t.vocabId !== null) return t;
+                    const override = tokenOverrides.get(`${line.lineId}-${idx}`);
+                    return override ? { ...t, definition: override } : t;
+                  })}
                   rawText={line.rawText}
                   onWordClick={onWordClick}
                 />

@@ -305,6 +305,19 @@ export function Sidebar({ captureMode, onStart, onPause, onStop, onRecalibrate, 
               );
             })}
 
+            {/* Auto-translate color */}
+            {displayConfig.autoTranslate && (
+              <div style={{ display: "flex", alignItems: "center", gap: "3px", marginTop: "2px" }}>
+                <span style={{ fontSize: "9px", color: "#475569", width: "24px", flexShrink: 0 }}>超纲</span>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "2px" }}>
+                  {PRESET_COLORS.map((c) => (
+                    <Swatch key={c} color={c} selected={displayConfig.colorAutoTranslate === c}
+                      onClick={() => onDisplayChange({ colorAutoTranslate: c })} />
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", marginTop: "2px", paddingTop: "6px" }}>
               <div style={panelHeader}>翻译位置</div>
             </div>

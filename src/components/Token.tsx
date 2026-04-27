@@ -12,6 +12,8 @@ export function Token({ token, onClick, vocabIndex = 0 }: Props) {
   const config = useDisplaySettings();
 
   const getColor = (): string | undefined => {
+    // Auto-translated token: has definition but no color/vocabId (not from vocab book)
+    if (token.definition && !token.color && token.vocabId === null) return config.colorAutoTranslate;
     if (!token.color) return undefined;
     if (config.colorMode === "single") return config.colorSingle;
     const map = { yellow: config.colorEasy, orange: config.colorMedium, red: config.colorHard };

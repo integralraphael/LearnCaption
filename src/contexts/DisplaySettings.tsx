@@ -9,6 +9,8 @@ export interface DisplayConfig {
   colorEasy: string;    // backend "yellow" tier
   colorMedium: string;  // backend "orange" tier
   colorHard: string;    // backend "red" tier
+  /** Color applied to auto-translated tokens (frq > threshold, not in vocab book) */
+  colorAutoTranslate: string;
   translationPosition: TranslationPosition;
   sentenceTranslation: boolean;
   /** Auto-annotate hard words (frq > calibration threshold) with ECDICT definitions inline */
@@ -21,6 +23,7 @@ export const defaultDisplayConfig: DisplayConfig = {
   colorEasy: "#fbbf24",
   colorMedium: "#f97316",
   colorHard: "#ef4444",
+  colorAutoTranslate: "#94a3b8",
   translationPosition: "inline_bracket",
   sentenceTranslation: false,
   autoTranslate: false,
@@ -32,6 +35,7 @@ export const DB_KEY_MAP: Record<keyof DisplayConfig, string> = {
   colorEasy: "display_color_easy",
   colorMedium: "display_color_medium",
   colorHard: "display_color_hard",
+  colorAutoTranslate: "display_color_auto_translate",
   translationPosition: "display_translation_position",
   sentenceTranslation: "display_sentence_translation",
   autoTranslate: "auto_translate",
