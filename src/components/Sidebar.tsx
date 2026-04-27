@@ -1,5 +1,6 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useState } from "react";
+import { Play, Pause, Square, AudioLines, SlidersHorizontal } from "lucide-react";
 import type { DisplayConfig } from "../contexts/DisplaySettings";
 import { PRESET_COLORS } from "../contexts/DisplaySettings";
 
@@ -63,7 +64,7 @@ export function Sidebar({ captureMode, onStart, onPause, onStop, onRecalibrate, 
           }}
           title={recording ? "暂停" : "开始"}
         >
-          {recording ? "⏸" : "▶"}
+          {recording ? <Pause size={11} /> : <Play size={10} />}
         </button>
 
         {/* Stop */}
@@ -81,7 +82,7 @@ export function Sidebar({ captureMode, onStart, onPause, onStop, onRecalibrate, 
           }}
           title="停止"
         >
-          ⏹
+          <Square size={12} />
         </button>
 
         {/* Source */}
@@ -96,6 +97,7 @@ export function Sidebar({ captureMode, onStart, onPause, onStop, onRecalibrate, 
               justifyContent: "center",
             }}
             title={captureMode === "browser" ? "Google Meet" : "Whisper"}
+
           >
             <div
               style={{
@@ -124,7 +126,7 @@ export function Sidebar({ captureMode, onStart, onPause, onStop, onRecalibrate, 
             }}
             title="来源"
           >
-            🌐
+            <AudioLines size={12} />
           </button>
         )}
 
@@ -150,7 +152,7 @@ export function Sidebar({ captureMode, onStart, onPause, onStop, onRecalibrate, 
           }}
           title="设置"
         >
-          ⚙
+          <SlidersHorizontal size={12} />
         </button>
       </div>
 
