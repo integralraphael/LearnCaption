@@ -151,7 +151,8 @@ fn main() {
             || duration_s >= MAX_BUFFER_S;
 
         if should_infer && !pcm_buffer.is_empty() {
-            if let Ok(segments) = transcribe(&ctx, &pcm_buffer) {
+            match transcribe(&ctx, &pcm_buffer) {
+              Ok(segments) => {
                 // Join all segments from one inference into a single line.
                 // This prevents within-inference progressive hallucination where
                 // Whisper emits "A", "A B", "A B C" as separate overlapping segments.
@@ -161,12 +162,9 @@ fn main() {
                     .collect::<Vec<_>>()
                     .join(" ");
 
-                // Cross-inference deduplication: skip if identical to or a prefix
-                // of the previous output (catches hallucinated repetitions).
-                let norm = full_text.to_lowercase();
-                let norm_last = last_output.to_lowercase();
-                let is_dup = !norm.is_empty()
-                    && (norm == norm_last || norm_last.starts_with(&norm));
+                // Skip exact duplicates only (e.g. Whisper repeating the same line
+                // on the next buffer due to hallucination on silence).
+                let is_dup = !full_text.is_empty() && full_text == last_output;
 
                 if !full_text.is_empty() && !is_dup {
                     let json = serde_json::json!({"text": full_text, "timestamp_ms": session_start_ms});
@@ -174,6 +172,8 @@ fn main() {
                     let _ = out.flush();
                     last_output = full_text;
                 }
+              }
+              Err(e) => eprintln!("whisper-worker: transcribe error: {e}"),
             }
             session_start_ms +=
                 (pcm_buffer.len() as f64 / SAMPLE_RATE as f64 * 1000.0) as i64;
