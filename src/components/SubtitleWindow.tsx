@@ -108,11 +108,14 @@ interface Props {
 export function SubtitleWindow({ onWordClick, onPhraseSelect, onScrollState }: Props) {
   const [lines, setLines] = useState<AnnotatedLine[]>([]);
   const [lineTranslations, setLineTranslations] = useState<Map<number, string>>(new Map());
-  // Overrides for auto-translated token definitions (ECDICT replaced by shorter AI result)
-  // Key: `${lineId}-${tokenIdx}`
+  // AI translation results for auto tokens. Key: `${lineId}-${normalizedWord}`
+  // Using word (not index) so the same word isn't re-translated across updates.
   const [tokenOverrides, setTokenOverrides] = useState<Map<string, string>>(new Map());
   const translatedIdsRef = useRef<Set<number>>(new Set());
   const translatedTokensRef = useRef<Set<string>>(new Set());
+
+  const autoWordKey = (lineId: number, text: string) =>
+    `${lineId}-${text.toLowerCase().replace(/[^a-z']/g, "")}`;
   const containerRef = useRef<HTMLDivElement>(null);
   const autoFollowRef = useRef(true);
   const config = useDisplaySettings();
@@ -166,24 +169,25 @@ export function SubtitleWindow({ onWordClick, onPhraseSelect, onScrollState }: P
       .catch(() => {}); // silently ignore (model not downloaded etc.)
   }, [lines.length, config.sentenceTranslation]);
 
-  // Auto-translate: for tokens marked color="auto" (hard words, not in vocab book),
-  // fire AI + context translation. Show result when it arrives; show nothing on failure.
-  // Runs on the previously finalized line (same timing as sentence translation).
+  // Auto-translate: fire AI as soon as an "auto" token first appears in any line update.
+  // Using word-based key so the same word isn't re-sent across successive update events.
+  // This fires on every lines change (including mid-sentence updates) so translation
+  // starts the moment the word is first seen, not after the next sentence begins.
   useEffect(() => {
-    if (lines.length < 2) return;
-    const prevLine = lines[lines.length - 2];
-    prevLine.tokens.forEach((token, tokenIdx) => {
+    if (lines.length === 0) return;
+    const currentLine = lines[lines.length - 1];
+    currentLine.tokens.forEach((token) => {
       if (token.color !== "auto") return;
-      const key = `${prevLine.lineId}-${tokenIdx}`;
-      if (translatedTokensRef.current.has(key)) return;
-      translatedTokensRef.current.add(key);
       const word = token.text.replace(/[^a-zA-Z'-]/g, "");
       if (!word) return;
-      invoke<string>("translate_selection", { selection: word, context: prevLine.rawText })
+      const key = autoWordKey(currentLine.lineId, word);
+      if (translatedTokensRef.current.has(key)) return;
+      translatedTokensRef.current.add(key);
+      invoke<string>("translate_selection", { selection: word, context: currentLine.rawText })
         .then((ai) => setTokenOverrides((prev) => new Map(prev).set(key, ai)))
-        .catch(() => {}); // silently ignore — token stays blank
+        .catch(() => {});
     });
-  }, [lines.length]);
+  }, [lines]);
 
   const reportScroll = useCallback(() => {
     const el = containerRef.current;
@@ -291,9 +295,9 @@ export function SubtitleWindow({ onWordClick, onPhraseSelect, onScrollState }: P
               {/* English tokens + Chinese translation, left-aligned together */}
               <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
                 <SubtitleLine
-                  tokens={line.tokens.map((t, idx) => {
+                  tokens={line.tokens.map((t) => {
                     if (t.color !== "auto") return t;
-                    const override = tokenOverrides.get(`${line.lineId}-${idx}`);
+                    const override = tokenOverrides.get(autoWordKey(line.lineId, t.text));
                     return override ? { ...t, definition: override } : t;
                   })}
                   rawText={line.rawText}
