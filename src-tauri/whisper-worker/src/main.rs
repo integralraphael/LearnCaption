@@ -175,6 +175,7 @@ fn transcribe(ctx: &WhisperContext, samples: &[f32]) -> Result<Vec<(String, i64)
     let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
     params.set_language(Some("en"));
     params.set_no_speech_thold(0.6);
+    params.set_no_context(true);   // don't hallucinate from prior segments
     params.set_print_special(false);
     params.set_print_progress(false);
     params.set_print_realtime(false);

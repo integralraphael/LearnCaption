@@ -1,4 +1,5 @@
 use std::process::{Child, Command, Stdio};
+use tauri::Manager;
 
 /// Manages two child processes:
 ///   audio-capture (Swift) → stdout → whisper-worker (Rust) → stdout → main process
@@ -38,6 +39,14 @@ impl AudioSidecar {
             exe_dir.join("whisper-worker")
         };
 
+        // Resolve ggml-metal.metal resource directory so whisper-worker can init Metal GPU.
+        // In dev mode: src-tauri/resources/. In bundled: Contents/Resources/.
+        let metal_resources_dir = app
+            .path()
+            .resolve("ggml-metal.metal", tauri::path::BaseDirectory::Resource)
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.to_path_buf()));
+
         // Spawn audio-capture with its stdout piped
         let mut audio_child = Command::new(&audio_bin)
             .stdout(Stdio::piped())
@@ -48,13 +57,18 @@ impl AudioSidecar {
             std::io::Error::new(std::io::ErrorKind::Other, "audio-capture stdout not available")
         })?;
 
-        // Spawn whisper-worker with audio stdout as its stdin
-        let whisper_child = Command::new(&whisper_bin)
+        // Spawn whisper-worker with audio stdout as its stdin.
+        // Pass GGML_METAL_PATH_RESOURCES so ggml can find ggml-metal.metal at runtime.
+        let mut whisper_cmd = Command::new(&whisper_bin);
+        whisper_cmd
             .arg(model_path)
             .stdin(audio_stdout)
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .spawn()?;
+            .stderr(Stdio::inherit());
+        if let Some(dir) = metal_resources_dir {
+            whisper_cmd.env("GGML_METAL_PATH_RESOURCES", dir);
+        }
+        let whisper_child = whisper_cmd.spawn()?;
 
         Ok(Self { audio_child, whisper_child })
     }
