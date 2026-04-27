@@ -5,7 +5,8 @@ export interface WordToken {
   text: string;
   definition: string | null;   // null = no annotation
   vocabId: number | null;      // null = not in vocab book
-  color: "yellow" | "orange" | "red" | null;
+  /** "yellow"|"orange"|"red" = vocab book tiers; "auto" = hard word awaiting AI translation */
+  color: "yellow" | "orange" | "red" | "auto" | null;
 }
 
 export interface AnnotatedLine {

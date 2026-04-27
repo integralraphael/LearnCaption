@@ -164,24 +164,20 @@ impl Annotator {
                 }
             } else {
                 let word_text = &raw[wstart.._wend];
-                // Auto-translate: look up hard words (frq > threshold) not in vocab book.
-                // No color — auto-annotated words are visually distinct from vocab-book words.
-                let auto_def = if self.auto_translate {
+                // Auto-translate: flag hard words (frq > threshold) not in vocab book.
+                // color="auto" is a sentinel: the frontend fires AI translation for these tokens.
+                // definition is left None — ECDICT is only used for the frq check, not displayed.
+                let is_hard = if self.auto_translate {
                     let clean = word_text.trim_matches(|c: char| !c.is_alphabetic());
-                    if !clean.is_empty() {
-                        self.dict.lookup_if_difficult(clean, self.frq_threshold)
-                            .map(|s| s.to_string())
-                    } else {
-                        None
-                    }
+                    !clean.is_empty() && self.dict.lookup_if_difficult(clean, self.frq_threshold).is_some()
                 } else {
-                    None
+                    false
                 };
                 tokens.push(WordToken {
                     text: word_text.to_string(),
-                    definition: auto_def,
+                    definition: None,
                     vocab_id: None,
-                    color: None,
+                    color: if is_hard { Some("auto".to_string()) } else { None },
                 });
                 word_idx += 1;
             }

@@ -12,12 +12,11 @@ export function Token({ token, onClick, vocabIndex = 0 }: Props) {
   const config = useDisplaySettings();
 
   const getColor = (): string | undefined => {
-    // Auto-translated token: has definition but no color/vocabId (not from vocab book)
-    if (token.definition && !token.color && token.vocabId === null) return config.colorAutoTranslate;
     if (!token.color) return undefined;
+    if (token.color === "auto") return config.colorAutoTranslate;
     if (config.colorMode === "single") return config.colorSingle;
     const map = { yellow: config.colorEasy, orange: config.colorMedium, red: config.colorHard };
-    return map[token.color as "yellow" | "orange" | "red"] ?? config.colorSingle;
+    return map[token.color] ?? config.colorSingle;
   };
 
   const color = getColor();

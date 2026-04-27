@@ -82,7 +82,8 @@ function SubtitleLine({ tokens, rawText, onWordClick }: SubtitleLineProps) {
       }}
     >
       {tokens.map((token, j) => {
-        const vi = token.definition ? vocabCount++ : 0;
+        // Count any highlighted token (vocab book or auto) for stagger index assignment
+        const vi = token.color ? vocabCount++ : 0;
         return (
           <Token
             key={j}
@@ -165,31 +166,22 @@ export function SubtitleWindow({ onWordClick, onPhraseSelect, onScrollState }: P
       .catch(() => {}); // silently ignore (model not downloaded etc.)
   }, [lines.length, config.sentenceTranslation]);
 
-  // Auto-translate AI refinement: for tokens annotated from ECDICT (not vocab book),
-  // fire AI translation concurrently and replace with the shorter result.
+  // Auto-translate: for tokens marked color="auto" (hard words, not in vocab book),
+  // fire AI + context translation. Show result when it arrives; show nothing on failure.
   // Runs on the previously finalized line (same timing as sentence translation).
   useEffect(() => {
     if (lines.length < 2) return;
     const prevLine = lines[lines.length - 2];
     prevLine.tokens.forEach((token, tokenIdx) => {
-      // Auto-translated token: has ECDICT definition but no vocab book color/id
-      if (!token.definition || token.color !== null || token.vocabId !== null) return;
+      if (token.color !== "auto") return;
       const key = `${prevLine.lineId}-${tokenIdx}`;
       if (translatedTokensRef.current.has(key)) return;
       translatedTokensRef.current.add(key);
-      const ecdict = token.definition;
       const word = token.text.replace(/[^a-zA-Z'-]/g, "");
       if (!word) return;
-      // AI + context for accurate contextual translation.
-      // If AI returns something longer than the ECDICT first-meaning (i.e. it translated
-      // the whole sentence instead of the word), the length check below keeps ECDICT.
       invoke<string>("translate_selection", { selection: word, context: prevLine.rawText })
-        .then((ai) => {
-          if (ai.length < ecdict.length) {
-            setTokenOverrides((prev) => new Map(prev).set(key, ai));
-          }
-        })
-        .catch(() => {}); // silently ignore
+        .then((ai) => setTokenOverrides((prev) => new Map(prev).set(key, ai)))
+        .catch(() => {}); // silently ignore — token stays blank
     });
   }, [lines.length]);
 
@@ -300,7 +292,7 @@ export function SubtitleWindow({ onWordClick, onPhraseSelect, onScrollState }: P
               <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
                 <SubtitleLine
                   tokens={line.tokens.map((t, idx) => {
-                    if (!t.definition || t.color !== null || t.vocabId !== null) return t;
+                    if (t.color !== "auto") return t;
                     const override = tokenOverrides.get(`${line.lineId}-${idx}`);
                     return override ? { ...t, definition: override } : t;
                   })}
