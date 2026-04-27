@@ -351,6 +351,21 @@ export function Sidebar({ captureMode, onStart, onPause, onStop, onRecalibrate, 
               <Toggle on={displayConfig.autoTranslate} />
             </div>
 
+            <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", marginTop: "2px", paddingTop: "6px" }}>
+              <div style={panelHeader}>透明度</div>
+            </div>
+            <div style={{ padding: "2px 6px 4px" }}>
+              <input
+                type="range" min={20} max={100} step={5}
+                value={displayConfig.opacity}
+                onChange={(e) => onDisplayChange({ opacity: Number(e.target.value) })}
+                style={{ width: "100%", accentColor: "#60a5fa", cursor: "pointer" }}
+              />
+              <div style={{ textAlign: "right", fontSize: "9px", color: "#475569", marginTop: "1px" }}>
+                {displayConfig.opacity}%
+              </div>
+            </div>
+
             <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", marginTop: "2px", paddingTop: "6px" }} />
 
             <div onClick={onRecalibrate} style={settingsItem}>

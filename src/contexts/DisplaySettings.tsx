@@ -15,6 +15,8 @@ export interface DisplayConfig {
   sentenceTranslation: boolean;
   /** Auto-annotate hard words (frq > calibration threshold) with ECDICT definitions inline */
   autoTranslate: boolean;
+  /** Window background opacity 0–100 */
+  opacity: number;
 }
 
 export const defaultDisplayConfig: DisplayConfig = {
@@ -27,6 +29,7 @@ export const defaultDisplayConfig: DisplayConfig = {
   translationPosition: "inline_bracket",
   sentenceTranslation: false,
   autoTranslate: false,
+  opacity: 85,
 };
 
 export const DB_KEY_MAP: Record<keyof DisplayConfig, string> = {
@@ -39,6 +42,7 @@ export const DB_KEY_MAP: Record<keyof DisplayConfig, string> = {
   translationPosition: "display_translation_position",
   sentenceTranslation: "display_sentence_translation",
   autoTranslate: "auto_translate",
+  opacity: "display_opacity",
 };
 
 export const PRESET_COLORS = [

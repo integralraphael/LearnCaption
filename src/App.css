@@ -1,6 +1,5 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-html, body, #root { height: 100%; }
-body { background: transparent; overflow: hidden; }
+html, body, #root { height: 100%; border-radius: 12px; overflow: hidden; background: transparent; }
 button { font-family: inherit; }
 
 /* Hide scrollbars globally but keep scroll functionality */

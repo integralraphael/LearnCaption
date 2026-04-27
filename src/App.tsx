@@ -53,8 +53,10 @@ export default function App() {
       for (const [field, value] of entries) {
         if (value !== null) {
           const boolFields: (keyof DisplayConfig)[] = ["sentenceTranslation", "autoTranslate"];
+          const numFields: (keyof DisplayConfig)[] = ["opacity"];
           (updates as Record<string, unknown>)[field] =
-            boolFields.includes(field) ? value === "true" : value;
+            boolFields.includes(field) ? value === "true" :
+            numFields.includes(field) ? Number(value) : value;
         }
       }
       setDisplayConfig((prev) => ({ ...prev, ...updates }));
@@ -218,9 +220,10 @@ export default function App() {
   }
 
   // ── Main HUD ──
+  const alpha = Math.round(displayConfig.opacity) / 100;
   return (
     <DisplaySettingsContext.Provider value={displayConfig}>
-    <div style={{ ...styles.root, flexDirection: "column" }}>
+    <div style={{ ...styles.root, flexDirection: "column", background: `rgba(15,23,42,${alpha})` }}>
       <TopBar />
       <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
       <Sidebar
@@ -270,13 +273,12 @@ export default function App() {
 const styles = {
   root: {
     background: "rgba(15,23,42,0.85)",
-    backdropFilter: "blur(12px)",
-    WebkitBackdropFilter: "blur(12px)",
     height: "100%",
     display: "flex",
     fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
     color: "#e2e8f0",
     overflow: "hidden",
+    borderRadius: "12px",
   } as React.CSSProperties,
   primaryBtn: {
     background: "#1e3a5f",
