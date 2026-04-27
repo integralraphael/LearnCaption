@@ -1,4 +1,4 @@
-use std::io::Read;
+use std::io::{BufRead, BufReader};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, State};
 
@@ -6,7 +6,7 @@ use crate::caption_source::{CaptionAction, CaptionPipeline, RawCaption};
 use crate::db::{load_annotator_config, load_vocab_entries, AppDb};
 use crate::dictionary::EcdictDictionary;
 use crate::pipeline::{
-    download_model, has_speech, model_exists, model_path, Annotator, AudioSidecar, SttEngine,
+    download_model, model_exists, model_path, Annotator, AudioSidecar,
 };
 
 pub struct PipelineState {
@@ -73,68 +73,39 @@ pub async fn start_recording(
     ));
 
     let model_p = model_path(&app);
-    let mut audio = AudioSidecar::spawn(&app).map_err(|e| e.to_string())?;
-    let audio_stdout = audio.take_stdout().ok_or("audio stdout already taken")?;
+    let model_str = model_p.to_str().ok_or("model path is not valid UTF-8")?.to_string();
+    let mut audio = AudioSidecar::spawn(&app, &model_str).map_err(|e| e.to_string())?;
+    let whisper_stdout = audio.take_stdout().ok_or("whisper-worker stdout already taken")?;
     *state.sidecar.lock().unwrap() = Some(audio);
 
     let app2 = app.clone();
 
     std::thread::spawn(move || {
-        let engine = match SttEngine::load(&model_p) {
-            Ok(e) => e,
-            Err(err) => {
-                let _ = app2.emit("pipeline-error", err);
-                return;
-            }
-        };
-
-        const SAMPLE_RATE: usize = 16000;
-        const CHUNK_BYTES: usize = 1600 * 4;
-        const MAX_BUFFER_S: usize = 8;
-        const SILENCE_CHUNKS: usize = 4;
-
-        let mut pcm_buffer: Vec<f32> = Vec::new();
-        let mut silent_chunks: usize = 0;
-        let mut session_start_ms: i64 = 0;
-        let mut buf = vec![0u8; 4 + CHUNK_BYTES];
-        let mut reader = std::io::BufReader::new(audio_stdout);
-
-        loop {
-            if reader.read_exact(&mut buf[..4]).is_err() { break; }
-            let len = u32::from_le_bytes(buf[..4].try_into().unwrap()) as usize;
-            if len > CHUNK_BYTES { break; }
-            if reader.read_exact(&mut buf[4..4 + len]).is_err() { break; }
-
-            let samples: Vec<f32> = buf[4..4 + len]
-                .chunks_exact(4)
-                .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
-                .collect();
-
-            let is_speech = has_speech(&samples, 0.01);
-            pcm_buffer.extend_from_slice(&samples);
-            silent_chunks = if is_speech { 0 } else { silent_chunks + 1 };
-
-            let duration_s = pcm_buffer.len() / SAMPLE_RATE;
-            let should_infer = (silent_chunks >= SILENCE_CHUNKS && duration_s > 0)
-                || duration_s >= MAX_BUFFER_S;
-
-            if should_infer && !pcm_buffer.is_empty() {
-                if let Ok(segments) = engine.transcribe(&pcm_buffer) {
-                    for (text, offset_ms) in segments {
-                        pipeline.process(RawCaption {
-                            text,
-                            speaker: None,
-                            action: CaptionAction::NewBlock,
-                            timestamp_ms: session_start_ms + offset_ms,
-                        });
-                    }
-                }
-                session_start_ms +=
-                    (pcm_buffer.len() as f64 / SAMPLE_RATE as f64 * 1000.0) as i64;
-                pcm_buffer.clear();
-                silent_chunks = 0;
-            }
+        // Read newline-delimited JSON from whisper-worker:
+        // {"text": "...", "timestamp_ms": N}
+        let reader = BufReader::new(whisper_stdout);
+        for line in reader.lines() {
+            let line = match line {
+                Ok(l) => l,
+                Err(_) => break,
+            };
+            let v: serde_json::Value = match serde_json::from_str(&line) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            let text = match v["text"].as_str() {
+                Some(t) => t.to_string(),
+                None => continue,
+            };
+            let timestamp_ms = v["timestamp_ms"].as_i64().unwrap_or(0);
+            pipeline.process(RawCaption {
+                text,
+                speaker: None,
+                action: CaptionAction::NewBlock,
+                timestamp_ms,
+            });
         }
+        let _ = app2.emit("pipeline-error", "whisper-worker exited");
     });
 
     let _ = app.emit("source-changed", "whisper");
