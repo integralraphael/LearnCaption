@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
 import type { WordToken } from "./types/subtitle";
 import { Sidebar } from "./components/Sidebar";
+import { TopBar } from "./components/TopBar";
 import { SubtitleWindow, jumpSubtitleToLatest } from "./components/SubtitleWindow";
 import { ScrollColumn } from "./components/ScrollColumn";
 import { WordDetail } from "./components/WordDetail";
@@ -160,21 +161,24 @@ export default function App() {
   if (modelReady && calibrated === false) {
     return (
       <DisplaySettingsContext.Provider value={displayConfig}>
-      <div style={styles.root}>
-        <Sidebar
-          captureMode="none"
-          onStart={() => {}}
-          onPause={() => {}}
-          onStop={() => {}}
-          onRecalibrate={() => {}}
-          disabled
-          displayConfig={displayConfig}
-          onDisplayChange={handleDisplayChange}
-        />
-        <div style={{ flex: 1, overflow: "auto" }}>
-          <VocabCalibration onComplete={() => setCalibrated(true)} />
+      <div style={{ ...styles.root, flexDirection: "column" }}>
+        <TopBar />
+        <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+          <Sidebar
+            captureMode="none"
+            onStart={() => {}}
+            onPause={() => {}}
+            onStop={() => {}}
+            onRecalibrate={() => {}}
+            disabled
+            displayConfig={displayConfig}
+            onDisplayChange={handleDisplayChange}
+          />
+          <div style={{ flex: 1, overflow: "auto" }}>
+            <VocabCalibration onComplete={() => setCalibrated(true)} />
+          </div>
+          <div style={{ width: "32px", borderLeft: "1px solid rgba(255,255,255,0.04)", flexShrink: 0 }} />
         </div>
-        <div style={{ width: "32px", borderLeft: "1px solid rgba(255,255,255,0.04)", flexShrink: 0 }} />
       </div>
       </DisplaySettingsContext.Provider>
     );
@@ -216,7 +220,9 @@ export default function App() {
   // ── Main HUD ──
   return (
     <DisplaySettingsContext.Provider value={displayConfig}>
-    <div style={styles.root}>
+    <div style={{ ...styles.root, flexDirection: "column" }}>
+      <TopBar />
+      <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
       <Sidebar
         captureMode={captureMode}
         onStart={handleStart}
@@ -255,6 +261,7 @@ export default function App() {
         onJumpToLatest={jumpSubtitleToLatest}
       />
 
+      </div>
     </div>
     </DisplaySettingsContext.Provider>
   );

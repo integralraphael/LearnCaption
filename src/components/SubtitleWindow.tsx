@@ -180,7 +180,9 @@ export function SubtitleWindow({ onWordClick, onPhraseSelect, onScrollState }: P
       const ecdict = token.definition;
       const word = token.text.replace(/[^a-zA-Z'-]/g, "");
       if (!word) return;
-      invoke<string>("translate_selection", { selection: word, context: prevLine.rawText })
+      // Pass context: null so AI translates the word itself, not the whole sentence.
+      // With sentence context, AI often translates the full sentence for simple words.
+      invoke<string>("translate_selection", { selection: word, context: null })
         .then((ai) => {
           if (ai.length < ecdict.length) {
             setTokenOverrides((prev) => new Map(prev).set(key, ai));

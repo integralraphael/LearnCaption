@@ -1,4 +1,3 @@
-import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useState } from "react";
 import type { DisplayConfig } from "../contexts/DisplaySettings";
@@ -20,22 +19,12 @@ interface Props {
 
 export function Sidebar({ captureMode, onStart, onPause, onStop, onRecalibrate, disabled, displayConfig, onDisplayChange }: Props) {
   const [activePanel, setActivePanel] = useState<L2Panel>("none");
-  const [alwaysOnTop, setAlwaysOnTop] = useState(true);
   const [selectedSource, setSelectedSource] = useState<"whisper" | "browser">("browser");
 
   const recording = captureMode !== "none";
 
   const togglePanel = (panel: L2Panel) => {
     setActivePanel((cur) => (cur === panel ? "none" : panel));
-  };
-
-  const handleTogglePin = async () => {
-    try {
-      const newVal = await invoke<boolean>("toggle_always_on_top");
-      setAlwaysOnTop(newVal);
-    } catch (e) {
-      console.error("toggle_always_on_top failed:", e);
-    }
   };
 
   const handlePlayPause = () => {
@@ -364,10 +353,6 @@ export function Sidebar({ captureMode, onStart, onPause, onStop, onRecalibrate, 
 
             <div onClick={onRecalibrate} style={settingsItem}>
               <span style={{ color: "#94a3b8", fontSize: "11px" }}>🎯 词汇校准</span>
-            </div>
-            <div onClick={handleTogglePin} style={{ ...settingsItem, justifyContent: "space-between" }}>
-              <span style={{ color: "#94a3b8", fontSize: "11px" }}>📌 置顶</span>
-              <Toggle on={alwaysOnTop} />
             </div>
           </div>
         )}

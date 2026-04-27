@@ -106,7 +106,7 @@ impl EcdictDictionary {
         let lower = word.to_lowercase();
         if let Some(e) = self.entries.get(&lower) {
             return if e.frq > threshold {
-                Some(e.translation.lines().next().unwrap_or(&e.translation))
+                Some(Self::first_meaning(&e.translation))
             } else {
                 None // found but too common
             };
@@ -116,7 +116,7 @@ impl EcdictDictionary {
         if stemmed != lower {
             if let Some(e) = self.entries.get(&stemmed) {
                 return if e.frq > threshold {
-                    Some(e.translation.lines().next().unwrap_or(&e.translation))
+                    Some(Self::first_meaning(&e.translation))
                 } else {
                     None
                 };
@@ -124,13 +124,26 @@ impl EcdictDictionary {
             let stem_e = format!("{stemmed}e");
             if let Some(e) = self.entries.get(&stem_e) {
                 return if e.frq > threshold {
-                    Some(e.translation.lines().next().unwrap_or(&e.translation))
+                    Some(Self::first_meaning(&e.translation))
                 } else {
                     None
                 };
             }
         }
         None
+    }
+
+    /// For inline display: take only the first meaning from an ECDICT translation field.
+    /// ECDICT uses \n for line separation and , / ， for meaning variants within a line.
+    /// e.g. "a. 操作的, 工作的, 营业上的, ..." → "a. 操作的"
+    fn first_meaning(translation: &str) -> &str {
+        let first_line = translation.lines().next().unwrap_or(translation);
+        // Split on Chinese or ASCII comma, take the first chunk, trim whitespace
+        first_line
+            .split(['，', ','])
+            .next()
+            .unwrap_or(first_line)
+            .trim()
     }
 
     /// Look up translation + difficulty for auto-vocab.
