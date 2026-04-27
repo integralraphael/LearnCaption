@@ -183,9 +183,14 @@ export function SubtitleWindow({ onWordClick, onPhraseSelect, onScrollState }: P
       const key = autoWordKey(currentLine.lineId, word);
       if (translatedTokensRef.current.has(key)) return;
       translatedTokensRef.current.add(key);
+      const ecdictFallback = token.definition;
       invoke<string>("translate_selection", { selection: word, context: currentLine.rawText })
         .then((ai) => setTokenOverrides((prev) => new Map(prev).set(key, ai)))
-        .catch(() => {});
+        .catch(() => {
+          if (ecdictFallback) {
+            setTokenOverrides((prev) => new Map(prev).set(key, ecdictFallback));
+          }
+        });
     });
   }, [lines]);
 
@@ -298,7 +303,7 @@ export function SubtitleWindow({ onWordClick, onPhraseSelect, onScrollState }: P
                   tokens={line.tokens.map((t) => {
                     if (t.color !== "auto") return t;
                     const override = tokenOverrides.get(autoWordKey(line.lineId, t.text));
-                    return override ? { ...t, definition: override } : t;
+                    return { ...t, definition: override ?? null };
                   })}
                   rawText={line.rawText}
                   onWordClick={onWordClick}
