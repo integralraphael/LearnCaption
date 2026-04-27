@@ -126,6 +126,7 @@ fn main() {
     let mut pcm_buffer: Vec<f32> = Vec::new();
     let mut silent_chunks: usize = 0;
     let mut session_start_ms: i64 = 0;
+    let mut last_output: String = String::new();
     let mut buf = vec![0u8; 4 + CHUNK_BYTES];
 
     loop {
@@ -151,11 +152,27 @@ fn main() {
 
         if should_infer && !pcm_buffer.is_empty() {
             if let Ok(segments) = transcribe(&ctx, &pcm_buffer) {
-                for (text, offset_ms) in segments {
-                    let ts = session_start_ms + offset_ms;
-                    let json = serde_json::json!({"text": text, "timestamp_ms": ts});
+                // Join all segments from one inference into a single line.
+                // This prevents within-inference progressive hallucination where
+                // Whisper emits "A", "A B", "A B C" as separate overlapping segments.
+                let full_text: String = segments
+                    .iter()
+                    .map(|(t, _)| t.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+
+                // Cross-inference deduplication: skip if identical to or a prefix
+                // of the previous output (catches hallucinated repetitions).
+                let norm = full_text.to_lowercase();
+                let norm_last = last_output.to_lowercase();
+                let is_dup = !norm.is_empty()
+                    && (norm == norm_last || norm_last.starts_with(&norm));
+
+                if !full_text.is_empty() && !is_dup {
+                    let json = serde_json::json!({"text": full_text, "timestamp_ms": session_start_ms});
                     let _ = writeln!(out, "{json}");
                     let _ = out.flush();
+                    last_output = full_text;
                 }
             }
             session_start_ms +=
