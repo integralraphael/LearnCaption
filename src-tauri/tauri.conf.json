@@ -23,6 +23,7 @@
         "alwaysOnTop": true
       }
     ],
+    "macOSPrivateApi": true,
     "security": {
       "csp": null
     }
