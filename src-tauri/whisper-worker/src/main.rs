@@ -1,5 +1,5 @@
 use std::io::{Read, Write, BufWriter};
-use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
+use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, WhisperState};
 use ort::{session::Session, value::Tensor};
 use ndarray::{Array2, Array3};
 
@@ -99,6 +99,9 @@ fn main() {
     let ctx = WhisperContext::new_with_params(&model_path, WhisperContextParameters::default())
         .expect("failed to load whisper model");
 
+    // Create WhisperState once and reuse — avoids Metal GPU init/teardown on every inference.
+    let mut whisper_state = ctx.create_state().expect("failed to create whisper state");
+
     eprintln!("whisper-worker: ready");
 
     let stdout = std::io::stdout();
@@ -111,6 +114,7 @@ fn main() {
     let mut session_start_ms: i64 = 0;
     let mut last_output: String = String::new();
     let mut buf = vec![0u8; 4 + CHUNK_BYTES];
+    let mut chunk_count: u64 = 0;
 
     loop {
         if reader.read_exact(&mut buf[..4]).is_err() { break; }
@@ -123,16 +127,27 @@ fn main() {
             .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
             .collect();
 
-        let is_speech = vad.speech_prob(&samples) > VAD_THRESHOLD;
+        let prob = vad.speech_prob(&samples);
+        let is_speech = prob > VAD_THRESHOLD;
         pcm_buffer.extend_from_slice(&samples);
         silent_chunks = if is_speech { 0 } else { silent_chunks + 1 };
+
+        // Log VAD every ~1s (every 10 chunks of 100ms) to diagnose threshold issues
+        chunk_count += 1;
+        if chunk_count % 10 == 0 {
+            let duration_s = pcm_buffer.len() as f32 / SAMPLE_RATE as f32;
+            eprintln!("vad: prob={:.3} is_speech={} silent_chunks={} buf={:.1}s",
+                prob, is_speech, silent_chunks, duration_s);
+        }
 
         let duration_s = pcm_buffer.len() / SAMPLE_RATE;
         let should_infer = (silent_chunks >= SILENCE_CHUNKS && duration_s > 0)
             || duration_s >= MAX_BUFFER_S;
 
         if should_infer && !pcm_buffer.is_empty() {
-            match transcribe(&ctx, &pcm_buffer) {
+            eprintln!("whisper-worker: inferring on {:.1}s of audio (silent_chunks={})",
+                pcm_buffer.len() as f32 / SAMPLE_RATE as f32, silent_chunks);
+            match transcribe(&mut whisper_state, &pcm_buffer) {
                 Ok(segments) => {
                     let full_text: String = segments
                         .iter()
@@ -160,9 +175,7 @@ fn main() {
     eprintln!("whisper-worker: stdin closed, exiting");
 }
 
-fn transcribe(ctx: &WhisperContext, samples: &[f32]) -> Result<Vec<(String, i64)>, String> {
-    let mut state = ctx.create_state().map_err(|e| e.to_string())?;
-
+fn transcribe(state: &mut WhisperState, samples: &[f32]) -> Result<Vec<(String, i64)>, String> {
     let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
     params.set_language(Some("en"));
     params.set_no_speech_thold(0.6);
