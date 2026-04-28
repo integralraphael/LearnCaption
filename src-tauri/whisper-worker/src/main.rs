@@ -31,6 +31,7 @@ fn main() {
 
     let mut pcm_buffer: Vec<f32> = Vec::new();
     let mut silent_chunks: usize = 0;
+    let mut had_speech = false; // true if any chunk in current buffer was above RMS threshold
     let mut session_start_ms: i64 = 0;
     let mut last_output = String::new();
     let mut buf = vec![0u8; 4 + CHUNK_BYTES];
@@ -47,6 +48,7 @@ fn main() {
             .collect();
 
         let is_speech = rms(&samples) > RMS_THRESHOLD;
+        if is_speech { had_speech = true; }
         pcm_buffer.extend_from_slice(&samples);
         silent_chunks = if is_speech { 0 } else { silent_chunks + 1 };
 
@@ -54,27 +56,31 @@ fn main() {
         let should_infer = (silent_chunks >= SILENCE_CHUNKS && duration_s > 0)
             || duration_s >= MAX_BUFFER_S;
 
-        if should_infer && !pcm_buffer.is_empty() {
-            match transcribe(&mut whisper_state, &pcm_buffer) {
-                Ok(segments) => {
-                    let full_text: String = segments
-                        .iter()
-                        .map(|(t, _)| t.as_str())
-                        .collect::<Vec<_>>()
-                        .join(" ");
-                    if !full_text.is_empty() && full_text != last_output {
-                        let json = serde_json::json!({"text": full_text, "timestamp_ms": session_start_ms});
-                        let _ = writeln!(out, "{json}");
-                        let _ = out.flush();
-                        last_output = full_text;
+        if should_infer {
+            // Only call Whisper if the buffer actually had speech — avoids hallucinating on silence.
+            if had_speech && !pcm_buffer.is_empty() {
+                match transcribe(&mut whisper_state, &pcm_buffer) {
+                    Ok(segments) => {
+                        let full_text: String = segments
+                            .iter()
+                            .map(|(t, _)| t.as_str())
+                            .collect::<Vec<_>>()
+                            .join(" ");
+                        if !full_text.is_empty() && full_text != last_output {
+                            let json = serde_json::json!({"text": full_text, "timestamp_ms": session_start_ms});
+                            let _ = writeln!(out, "{json}");
+                            let _ = out.flush();
+                            last_output = full_text;
+                        }
                     }
+                    Err(e) => eprintln!("whisper-worker: transcribe error: {e}"),
                 }
-                Err(e) => eprintln!("whisper-worker: transcribe error: {e}"),
             }
             session_start_ms +=
                 (pcm_buffer.len() as f64 / SAMPLE_RATE as f64 * 1000.0) as i64;
             pcm_buffer.clear();
             silent_chunks = 0;
+            had_speech = false;
         }
     }
 
