@@ -42,6 +42,12 @@ fn zeros_state() -> TValue {
 
 impl SileroVad {
     fn load() -> TractResult<Self> {
+        // Fix sr=16000 as a concrete constant so tract can constant-fold the
+        // 8kHz/16kHz conditional branch (If node) during graph optimization.
+        let sr_const = tract_ndarray::arr0::<i64>(SAMPLE_RATE as i64)
+            .into_tensor()
+            .into_arc_tensor();
+
         let model = tract_onnx::onnx()
             .model_for_read(&mut std::io::Cursor::new(VAD_MODEL))?
             .with_input_fact(0, InferenceFact::dt_shape(
@@ -50,7 +56,7 @@ impl SileroVad {
             .with_input_fact(1, InferenceFact::dt_shape(
                 f32::datum_type(), [2usize, 1, 128],
             ))?
-            // input 2 (sr) is a scalar i64 — leave unspecified so tract uses ONNX default
+            .with_input_fact(2, InferenceFact::from(sr_const))?
             .into_optimized()?
             .into_runnable()?;
 
@@ -82,13 +88,8 @@ impl SileroVad {
             (1, VAD_CHUNK), chunk.to_vec(),
         )?.into_tensor().into();
 
-        let sr: TValue = tract_ndarray::arr0::<i64>(SAMPLE_RATE as i64)
-            .into_tensor().into();
-
-        // Input order: input, state, sr
-        let result = self.model.run(tvec![
-            audio, self.state.clone(), sr
-        ])?;
+        // sr was constant-folded during load(); only pass audio + state at runtime.
+        let result = self.model.run(tvec![audio, self.state.clone()])?;
 
         // Output 0: probability (1,1); Output 1: updated state
         let prob = result[0].as_slice::<f32>()?[0];
