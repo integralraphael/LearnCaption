@@ -1,6 +1,5 @@
 use std::io::{Read, Write, BufWriter};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
-use tract_onnx::prelude::*;
 
 // Reads raw PCM audio from stdin (same chunk format as audio-capture sidecar):
 //   [4-byte LE u32 byte-count] [float32 samples...]
@@ -10,106 +9,24 @@ use tract_onnx::prelude::*;
 const SAMPLE_RATE: usize = 16000;
 const CHUNK_BYTES: usize = 1600 * 4; // 100ms @ 16kHz
 const MAX_BUFFER_S: usize = 4;
-const SILENCE_CHUNKS: usize = 2; // 200ms of silence triggers inference
+const SILENCE_CHUNKS: usize = 3; // 300ms of silence triggers inference
 
-// Silero VAD model embedded at compile time (2.2 MB)
-const VAD_MODEL: &[u8] = include_bytes!("../silero_vad.onnx");
-// 512 samples = 32ms @ 16kHz (Silero's recommended chunk size for 16kHz)
-const VAD_CHUNK: usize = 512;
-const VAD_THRESHOLD: f32 = 0.5;
+// RMS energy threshold for speech detection.
+// Normalized audio (range ±1): typical speech is 0.02–0.3, silence < 0.01.
+const SPEECH_RMS_THRESHOLD: f32 = 0.015;
 
-// ── Silero VAD ────────────────────────────────────────────────────────────────
-// This model variant has 3 inputs:
-//   0: input  float32 (1, VAD_CHUNK)
-//   1: state  float32 (2, 1, 128)   ← combined h+c LSTM state
-//   2: sr     int64   scalar
-// And 2 outputs:
-//   0: output float32 (1, 1)        ← speech probability
-//   1: stateN float32 (2, 1, 128)   ← updated state
+// ── Energy-based VAD ──────────────────────────────────────────────────────────
 
-type VadModel = SimplePlan<TypedFact, Box<dyn TypedOp>, Graph<TypedFact, Box<dyn TypedOp>>>;
-
-struct SileroVad {
-    model: VadModel,
-    state: TValue, // Combined LSTM state (2, 1, 128)
-}
-
-fn zeros_state() -> TValue {
-    tract_ndarray::Array3::<f32>::zeros((2, 1, 128))
-        .into_tensor()
-        .into()
-}
-
-impl SileroVad {
-    fn load() -> TractResult<Self> {
-        // Fix sr=16000 as a concrete constant so tract can constant-fold the
-        // 8kHz/16kHz conditional branch (If node) during graph optimization.
-        let sr_const = tract_ndarray::arr0::<i64>(SAMPLE_RATE as i64)
-            .into_tensor()
-            .into_arc_tensor();
-
-        let model = tract_onnx::onnx()
-            .model_for_read(&mut std::io::Cursor::new(VAD_MODEL))?
-            .with_input_fact(0, InferenceFact::dt_shape(
-                f32::datum_type(), [1usize, VAD_CHUNK],
-            ))?
-            .with_input_fact(1, InferenceFact::dt_shape(
-                f32::datum_type(), [2usize, 1, 128],
-            ))?
-            .with_input_fact(2, InferenceFact::from(sr_const))?
-            .into_optimized()?
-            .into_runnable()?;
-
-        Ok(Self { model, state: zeros_state() })
-    }
-
-    /// Returns max speech probability across all 512-sample chunks in `samples`.
-    fn speech_prob(&mut self, samples: &[f32]) -> f32 {
-        let mut max_prob: f32 = 0.0;
-        let mut buf = [0f32; VAD_CHUNK];
-
-        for chunk in samples.chunks(VAD_CHUNK) {
-            let slice: &[f32] = if chunk.len() == VAD_CHUNK {
-                chunk
-            } else {
-                buf[..chunk.len()].copy_from_slice(chunk);
-                buf[chunk.len()..].fill(0.0);
-                &buf
-            };
-            if let Ok(p) = self.run_chunk(slice) {
-                if p > max_prob { max_prob = p; }
-            }
-        }
-        max_prob
-    }
-
-    fn run_chunk(&mut self, chunk: &[f32]) -> TractResult<f32> {
-        let audio: TValue = tract_ndarray::Array2::from_shape_vec(
-            (1, VAD_CHUNK), chunk.to_vec(),
-        )?.into_tensor().into();
-
-        // sr was constant-folded during load(); only pass audio + state at runtime.
-        let result = self.model.run(tvec![audio, self.state.clone()])?;
-
-        // Output 0: probability (1,1); Output 1: updated state
-        let prob = result[0].as_slice::<f32>()?[0];
-        self.state = result[1].clone();
-        Ok(prob)
-    }
-
-    /// Reset LSTM state between inference segments.
-    fn reset(&mut self) {
-        self.state = zeros_state();
-    }
+fn is_speech(samples: &[f32]) -> bool {
+    if samples.is_empty() { return false; }
+    let rms = (samples.iter().map(|x| x * x).sum::<f32>() / samples.len() as f32).sqrt();
+    rms > SPEECH_RMS_THRESHOLD
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 fn main() {
     let model_path = std::env::args().nth(1).expect("Usage: whisper-worker <model_path>");
-
-    eprintln!("whisper-worker: loading Silero VAD");
-    let mut vad = SileroVad::load().expect("failed to load Silero VAD");
 
     eprintln!("whisper-worker: loading Whisper model from {model_path}");
     let ctx = WhisperContext::new_with_params(&model_path, WhisperContextParameters::default())
@@ -139,11 +56,9 @@ fn main() {
             .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
             .collect();
 
-        // Silero VAD: neural speech/silence detection
-        let is_speech = vad.speech_prob(&samples) > VAD_THRESHOLD;
-
+        let speech = is_speech(&samples);
         pcm_buffer.extend_from_slice(&samples);
-        silent_chunks = if is_speech { 0 } else { silent_chunks + 1 };
+        silent_chunks = if speech { 0 } else { silent_chunks + 1 };
 
         let duration_s = pcm_buffer.len() / SAMPLE_RATE;
         let should_infer = (silent_chunks >= SILENCE_CHUNKS && duration_s > 0)
@@ -151,34 +66,29 @@ fn main() {
 
         if should_infer && !pcm_buffer.is_empty() {
             match transcribe(&ctx, &pcm_buffer) {
-              Ok(segments) => {
-                // Join all segments from one inference into a single line.
-                // This prevents within-inference progressive hallucination where
-                // Whisper emits "A", "A B", "A B C" as separate overlapping segments.
-                let full_text: String = segments
-                    .iter()
-                    .map(|(t, _)| t.as_str())
-                    .collect::<Vec<_>>()
-                    .join(" ");
+                Ok(segments) => {
+                    // Join all segments into one line — prevents Whisper from emitting
+                    // progressive hallucinations ("A", "A B", "A B C") as separate lines.
+                    let full_text: String = segments
+                        .iter()
+                        .map(|(t, _)| t.as_str())
+                        .collect::<Vec<_>>()
+                        .join(" ");
 
-                // Skip exact duplicates only (e.g. Whisper repeating the same line
-                // on the next buffer due to hallucination on silence).
-                let is_dup = !full_text.is_empty() && full_text == last_output;
-
-                if !full_text.is_empty() && !is_dup {
-                    let json = serde_json::json!({"text": full_text, "timestamp_ms": session_start_ms});
-                    let _ = writeln!(out, "{json}");
-                    let _ = out.flush();
-                    last_output = full_text;
+                    // Skip exact duplicates (Whisper repeating the same line on silence).
+                    if !full_text.is_empty() && full_text != last_output {
+                        let json = serde_json::json!({"text": full_text, "timestamp_ms": session_start_ms});
+                        let _ = writeln!(out, "{json}");
+                        let _ = out.flush();
+                        last_output = full_text;
+                    }
                 }
-              }
-              Err(e) => eprintln!("whisper-worker: transcribe error: {e}"),
+                Err(e) => eprintln!("whisper-worker: transcribe error: {e}"),
             }
             session_start_ms +=
                 (pcm_buffer.len() as f64 / SAMPLE_RATE as f64 * 1000.0) as i64;
             pcm_buffer.clear();
             silent_chunks = 0;
-            vad.reset();
         }
     }
 
@@ -191,7 +101,7 @@ fn transcribe(ctx: &WhisperContext, samples: &[f32]) -> Result<Vec<(String, i64)
     let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
     params.set_language(Some("en"));
     params.set_no_speech_thold(0.6);
-    params.set_no_context(true);   // don't hallucinate from prior segments
+    params.set_no_context(true);
     params.set_print_special(false);
     params.set_print_progress(false);
     params.set_print_realtime(false);
