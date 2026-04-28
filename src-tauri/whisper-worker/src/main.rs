@@ -19,17 +19,23 @@ const VAD_CHUNK: usize = 512;
 const VAD_THRESHOLD: f32 = 0.5;
 
 // ── Silero VAD ────────────────────────────────────────────────────────────────
+// This model variant has 3 inputs:
+//   0: input  float32 (1, VAD_CHUNK)
+//   1: state  float32 (2, 1, 128)   ← combined h+c LSTM state
+//   2: sr     int64   scalar
+// And 2 outputs:
+//   0: output float32 (1, 1)        ← speech probability
+//   1: stateN float32 (2, 1, 128)   ← updated state
 
 type VadModel = SimplePlan<TypedFact, Box<dyn TypedOp>, Graph<TypedFact, Box<dyn TypedOp>>>;
 
 struct SileroVad {
     model: VadModel,
-    h: TValue, // LSTM hidden state (2, 1, 64)
-    c: TValue, // LSTM cell state  (2, 1, 64)
+    state: TValue, // Combined LSTM state (2, 1, 128)
 }
 
 fn zeros_state() -> TValue {
-    tract_ndarray::Array3::<f32>::zeros((2, 1, 64))
+    tract_ndarray::Array3::<f32>::zeros((2, 1, 128))
         .into_tensor()
         .into()
 }
@@ -42,18 +48,13 @@ impl SileroVad {
                 f32::datum_type(), [1usize, VAD_CHUNK],
             ))?
             .with_input_fact(1, InferenceFact::dt_shape(
-                i64::datum_type(), [1usize],
+                f32::datum_type(), [2usize, 1, 128],
             ))?
-            .with_input_fact(2, InferenceFact::dt_shape(
-                f32::datum_type(), [2usize, 1, 64],
-            ))?
-            .with_input_fact(3, InferenceFact::dt_shape(
-                f32::datum_type(), [2usize, 1, 64],
-            ))?
+            // input 2 (sr) is a scalar i64 — leave unspecified so tract uses ONNX default
             .into_optimized()?
             .into_runnable()?;
 
-        Ok(Self { model, h: zeros_state(), c: zeros_state() })
+        Ok(Self { model, state: zeros_state() })
     }
 
     /// Returns max speech probability across all 512-sample chunks in `samples`.
@@ -81,26 +82,23 @@ impl SileroVad {
             (1, VAD_CHUNK), chunk.to_vec(),
         )?.into_tensor().into();
 
-        let sr: TValue = tract_ndarray::Array1::<i64>::from_vec(vec![SAMPLE_RATE as i64])
+        let sr: TValue = tract_ndarray::arr0::<i64>(SAMPLE_RATE as i64)
             .into_tensor().into();
 
+        // Input order: input, state, sr
         let result = self.model.run(tvec![
-            audio, sr, self.h.clone(), self.c.clone()
+            audio, self.state.clone(), sr
         ])?;
 
-        // Persist updated LSTM states for next chunk
-        self.h = result[1].clone();
-        self.c = result[2].clone();
-
-        // Output shape is (1, 1) — grab first element
+        // Output 0: probability (1,1); Output 1: updated state
         let prob = result[0].as_slice::<f32>()?[0];
+        self.state = result[1].clone();
         Ok(prob)
     }
 
     /// Reset LSTM state between inference segments.
     fn reset(&mut self) {
-        self.h = zeros_state();
-        self.c = zeros_state();
+        self.state = zeros_state();
     }
 }
 
