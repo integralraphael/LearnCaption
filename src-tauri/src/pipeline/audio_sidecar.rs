@@ -1,5 +1,4 @@
 use std::process::{Child, Command, Stdio};
-use tauri::Manager;
 
 /// Manages two child processes:
 ///   audio-capture (Swift) → stdout → whisper-worker (Rust) → stdout → main process
@@ -12,7 +11,7 @@ pub struct AudioSidecar {
 }
 
 impl AudioSidecar {
-    pub fn spawn(app: &tauri::AppHandle, model_path: &str) -> std::io::Result<Self> {
+    pub fn spawn(_app: &tauri::AppHandle, model_path: &str) -> std::io::Result<Self> {
         let exe = std::env::current_exe()?;
         let exe_dir = exe.parent().ok_or_else(|| {
             std::io::Error::new(std::io::ErrorKind::NotFound, "exe directory not found")
@@ -40,12 +39,19 @@ impl AudioSidecar {
         };
 
         // Resolve ggml-metal.metal resource directory so whisper-worker can init Metal GPU.
-        // In dev mode: src-tauri/resources/. In bundled: Contents/Resources/.
-        let metal_resources_dir = app
-            .path()
-            .resolve("ggml-metal.metal", tauri::path::BaseDirectory::Resource)
-            .ok()
-            .and_then(|p| p.parent().map(|d| d.to_path_buf()));
+        // In dev mode: <exe_dir>/resources/ggml-metal.metal
+        // In bundled:  Contents/Resources/ggml-metal.metal (exe_dir/../Resources/)
+        let metal_resources_dir = {
+            let dev_path = exe_dir.join("resources").join("ggml-metal.metal");
+            let bundle_path = exe_dir.join("../Resources").join("ggml-metal.metal");
+            if dev_path.exists() {
+                Some(exe_dir.join("resources"))
+            } else if bundle_path.exists() {
+                Some(exe_dir.join("../Resources"))
+            } else {
+                None
+            }
+        };
 
         // Spawn audio-capture with its stdout piped
         let mut audio_child = Command::new(&audio_bin)
