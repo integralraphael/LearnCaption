@@ -1,7 +1,5 @@
 use std::io::{Read, Write, BufWriter};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, WhisperState};
-use ort::{session::Session, value::Tensor};
-use ndarray::{Array2, Array3};
 
 // Reads raw PCM audio from stdin (same chunk format as audio-capture sidecar):
 //   [4-byte LE u32 byte-count] [float32 samples...]
@@ -12,90 +10,12 @@ const SAMPLE_RATE: usize = 16000;
 const CHUNK_BYTES: usize = 1600 * 4; // 100ms @ 16kHz
 const MAX_BUFFER_S: usize = 4;
 const SILENCE_CHUNKS: usize = 3; // 300ms of silence triggers inference
-
-// Silero VAD model embedded at compile time
-const VAD_MODEL: &[u8] = include_bytes!("../silero_vad.onnx");
-const VAD_CHUNK: usize = 512;   // 32ms @ 16kHz
-const VAD_THRESHOLD: f32 = 0.5;
-
-// ── Silero VAD via ONNX Runtime ───────────────────────────────────────────────
-
-struct SileroVad {
-    session: Session,
-    state: Array3<f32>, // shape (2, 1, 128) — combined LSTM state
-}
-
-impl SileroVad {
-    fn load() -> ort::Result<Self> {
-        ort::init().commit();
-        let session = Session::builder()?.commit_from_memory(VAD_MODEL)?;
-        Ok(Self {
-            session,
-            state: Array3::<f32>::zeros((2, 1, 128)),
-        })
-    }
-
-    /// Returns max speech probability across all 512-sample chunks in `samples`.
-    fn speech_prob(&mut self, samples: &[f32]) -> f32 {
-        let mut max_prob: f32 = 0.0;
-        let mut buf = [0f32; VAD_CHUNK];
-        for chunk in samples.chunks(VAD_CHUNK) {
-            let slice: &[f32] = if chunk.len() == VAD_CHUNK {
-                chunk
-            } else {
-                buf[..chunk.len()].copy_from_slice(chunk);
-                buf[chunk.len()..].fill(0.0);
-                &buf
-            };
-            if let Ok(p) = self.run_chunk(slice) {
-                if p > max_prob { max_prob = p; }
-            }
-        }
-        max_prob
-    }
-
-    fn run_chunk(&mut self, chunk: &[f32]) -> ort::Result<f32> {
-        let audio = Tensor::from_array(
-            Array2::from_shape_vec((1, VAD_CHUNK), chunk.to_vec())
-                .expect("fixed shape"),
-        )?;
-        let state = Tensor::from_array(self.state.clone())?;
-        // sr as scalar (shape []) — model selects 8kHz vs 16kHz processing path
-        let sr = Tensor::from_array(ndarray::arr0::<i64>(SAMPLE_RATE as i64))?;
-
-        let outputs = self.session.run(ort::inputs![
-            "input" => audio,
-            "state" => state,
-            "sr"    => sr,
-        ])?;
-
-        let (_, prob_data) = outputs["output"].try_extract_tensor::<f32>()?;
-        let prob = prob_data[0];
-
-        // stateN shape: (2, batch=1, 128)
-        let (_, state_data) = outputs["stateN"].try_extract_tensor::<f32>()?;
-        if state_data.len() == 2 * 1 * 128 {
-            self.state = Array3::from_shape_vec((2, 1, 128), state_data.to_vec())
-                .expect("fixed shape");
-        }
-
-        Ok(prob)
-    }
-
-    fn reset(&mut self) {
-        self.state = Array3::<f32>::zeros((2, 1, 128));
-    }
-}
-
-// ── Main ─────────────────────────────────────────────────────────────────────
+const RMS_THRESHOLD: f32 = 0.01;
 
 fn main() {
     let model_path = std::env::args().nth(1).expect("Usage: whisper-worker <model_path>");
 
-    eprintln!("whisper-worker: loading Silero VAD");
-    let mut vad = SileroVad::load().expect("failed to load Silero VAD");
-
-    eprintln!("whisper-worker: loading Whisper model from {model_path}");
+    eprintln!("whisper-worker: loading model from {model_path}");
     let ctx = WhisperContext::new_with_params(&model_path, WhisperContextParameters::default())
         .expect("failed to load whisper model");
 
@@ -112,9 +32,8 @@ fn main() {
     let mut pcm_buffer: Vec<f32> = Vec::new();
     let mut silent_chunks: usize = 0;
     let mut session_start_ms: i64 = 0;
-    let mut last_output: String = String::new();
+    let mut last_output = String::new();
     let mut buf = vec![0u8; 4 + CHUNK_BYTES];
-    let mut chunk_count: u64 = 0;
 
     loop {
         if reader.read_exact(&mut buf[..4]).is_err() { break; }
@@ -127,26 +46,15 @@ fn main() {
             .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
             .collect();
 
-        let prob = vad.speech_prob(&samples);
-        let is_speech = prob > VAD_THRESHOLD;
+        let is_speech = rms(&samples) > RMS_THRESHOLD;
         pcm_buffer.extend_from_slice(&samples);
         silent_chunks = if is_speech { 0 } else { silent_chunks + 1 };
-
-        // Log VAD every ~1s (every 10 chunks of 100ms) to diagnose threshold issues
-        chunk_count += 1;
-        if chunk_count % 10 == 0 {
-            let duration_s = pcm_buffer.len() as f32 / SAMPLE_RATE as f32;
-            eprintln!("vad: prob={:.3} is_speech={} silent_chunks={} buf={:.1}s",
-                prob, is_speech, silent_chunks, duration_s);
-        }
 
         let duration_s = pcm_buffer.len() / SAMPLE_RATE;
         let should_infer = (silent_chunks >= SILENCE_CHUNKS && duration_s > 0)
             || duration_s >= MAX_BUFFER_S;
 
         if should_infer && !pcm_buffer.is_empty() {
-            eprintln!("whisper-worker: inferring on {:.1}s of audio (silent_chunks={})",
-                pcm_buffer.len() as f32 / SAMPLE_RATE as f32, silent_chunks);
             match transcribe(&mut whisper_state, &pcm_buffer) {
                 Ok(segments) => {
                     let full_text: String = segments
@@ -154,7 +62,6 @@ fn main() {
                         .map(|(t, _)| t.as_str())
                         .collect::<Vec<_>>()
                         .join(" ");
-
                     if !full_text.is_empty() && full_text != last_output {
                         let json = serde_json::json!({"text": full_text, "timestamp_ms": session_start_ms});
                         let _ = writeln!(out, "{json}");
@@ -168,11 +75,15 @@ fn main() {
                 (pcm_buffer.len() as f64 / SAMPLE_RATE as f64 * 1000.0) as i64;
             pcm_buffer.clear();
             silent_chunks = 0;
-            vad.reset();
         }
     }
 
     eprintln!("whisper-worker: stdin closed, exiting");
+}
+
+fn rms(samples: &[f32]) -> f32 {
+    if samples.is_empty() { return 0.0; }
+    (samples.iter().map(|s| s * s).sum::<f32>() / samples.len() as f32).sqrt()
 }
 
 fn transcribe(state: &mut WhisperState, samples: &[f32]) -> Result<Vec<(String, i64)>, String> {
