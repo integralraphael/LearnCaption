@@ -91,6 +91,41 @@ function WordPopup({ word, onClose }: WordPopupProps) {
   )
 }
 
+interface SpeakerBlock {
+  speaker: string | null
+  lines: TranscriptLine[]
+}
+
+/** Group consecutive lines from the same speaker into blocks. */
+function groupBySpeaker(lines: TranscriptLine[]): SpeakerBlock[] {
+  const blocks: SpeakerBlock[] = []
+  for (const line of lines) {
+    const last = blocks[blocks.length - 1]
+    if (last && last.speaker === line.speakerLabel) {
+      last.lines.push(line)
+    } else {
+      blocks.push({ speaker: line.speakerLabel, lines: [line] })
+    }
+  }
+  return blocks
+}
+
+function ClickableText({ text }: { text: string }) {
+  return (
+    <>
+      {text.split(/(\s+)/).map((token, i) => {
+        const word = token.replace(/[^a-zA-Z'-]/g, '')
+        return word.length > 1
+          ? <span key={i} style={{ cursor: 'pointer', borderRadius: '3px', padding: '0 1px' }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = '#334155')}
+              onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+            >{token}</span>
+          : <span key={i}>{token}</span>
+      })}
+    </>
+  )
+}
+
 interface TranscriptViewProps {
   meetingId: number
 }
@@ -116,31 +151,34 @@ function TranscriptView({ meetingId }: TranscriptViewProps) {
   if (loading) return <p style={{ color: '#64748b', padding: '20px' }}>Loading transcript…</p>
   if (lines.length === 0) return <p style={{ color: '#64748b', padding: '20px' }}>No transcript lines.</p>
 
+  const blocks = groupBySpeaker(lines)
+
   return (
     <>
       <div style={{ overflowY: 'auto', height: '100%', padding: '16px' }} onClick={handleWordClick}>
-        {lines.map((line) => (
-          <div key={line.id} style={{ marginBottom: '10px' }}>
-            {line.speakerLabel && (
-              <span style={{
-                display: 'inline-block', marginRight: '8px',
-                background: '#334155', color: '#94a3b8', borderRadius: '4px',
-                fontSize: '11px', padding: '1px 6px', fontWeight: 600,
-              }}>
-                {line.speakerLabel}
-              </span>
-            )}
-            <span style={{ color: '#cbd5e1', fontSize: '14px', lineHeight: '1.7' }}>
-              {line.text.split(/(\s+)/).map((token, i) => {
-                const word = token.replace(/[^a-zA-Z'-]/g, '')
-                return word.length > 1
-                  ? <span key={i} style={{ cursor: 'pointer', borderRadius: '3px', padding: '0 1px' }}
-                      onMouseEnter={(e) => (e.currentTarget.style.background = '#334155')}
-                      onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-                    >{token}</span>
-                  : <span key={i}>{token}</span>
-              })}
+        {blocks.map((block, bi) => (
+          <div key={bi} style={{ marginBottom: '16px', display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+            {/* Speaker badge — fixed width column so text aligns */}
+            <span style={{
+              flexShrink: 0, width: '80px', textAlign: 'right',
+              marginTop: '2px',
+              color: '#64748b', fontSize: '12px', fontWeight: 600,
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            }}>
+              {block.speaker ?? ''}
             </span>
+            {/* Paragraph: all lines joined with a space */}
+            <p style={{
+              margin: 0, color: '#cbd5e1', fontSize: '14px', lineHeight: '1.8',
+              flex: 1,
+            }}>
+              {block.lines.map((line, li) => (
+                <span key={line.id}>
+                  {li > 0 && ' '}
+                  <ClickableText text={line.text} />
+                </span>
+              ))}
+            </p>
           </div>
         ))}
       </div>
