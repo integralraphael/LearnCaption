@@ -119,19 +119,6 @@ if (window.__learnCaptionAttached) {
     blockState.set(block, sentences.slice());
   }
 
-  function initialFlush(container) {
-    const children = Array.from(container.children);
-    for (const child of children) {
-      if (isSpeakerBlock(child)) {
-        const captionDiv = getCaptionDiv(child);
-        if (captionDiv) {
-          const sentences = getSentences(captionDiv);
-          if (sentences.length > 0) blockState.set(child, sentences);
-        }
-      }
-    }
-  }
-
   function flushActive() {
     const container = getCaptionContainer();
     if (!container) return;
@@ -163,7 +150,10 @@ if (window.__learnCaptionAttached) {
     captionObserver.observe(container, { childList: true, subtree: true, characterData: true });
     isObserving = true;
     console.log("[LearnCaption] CC enabled — observing captions");
-    initialFlush(container);
+    // Don't pre-populate blockState here. Letting the first processBlock run with
+    // empty stored state ensures currently-visible sentences are actually sent,
+    // rather than silently skipped as "already seen".
+    flushActive();
     startReconnect();
   }
 
