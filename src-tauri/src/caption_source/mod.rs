@@ -75,15 +75,10 @@ impl CaptionPipeline {
             None => return,
         };
 
-        let action_str = match raw.action {
-            CaptionAction::NewBlock => "new_block",
-            CaptionAction::Append => "append",
-            CaptionAction::Update => "update",
-        };
-
-        let line_id: i64 = match raw.action {
-            CaptionAction::NewBlock | CaptionAction::Append => {
-                // INSERT a new row
+        // action_str is determined after DB operation so Update-fallback-to-Insert
+        // emits "new_block" (append to UI) rather than "update" (replace last line).
+        let (line_id, action_str): (i64, &str) = match raw.action {
+            CaptionAction::NewBlock => {
                 let conn = self.db.lock().unwrap();
                 if let Err(e) = conn.execute(
                     "INSERT INTO transcript_lines (meeting_id, text, timestamp_ms, speaker_label) \
@@ -95,7 +90,21 @@ impl CaptionPipeline {
                 }
                 let id = conn.last_insert_rowid();
                 *self.last_line_id.lock().unwrap() = Some(id);
-                id
+                (id, "new_block")
+            }
+            CaptionAction::Append => {
+                let conn = self.db.lock().unwrap();
+                if let Err(e) = conn.execute(
+                    "INSERT INTO transcript_lines (meeting_id, text, timestamp_ms, speaker_label) \
+                     VALUES (?1, ?2, ?3, ?4)",
+                    rusqlite::params![meeting_id, &raw.text, raw.timestamp_ms, raw.speaker],
+                ) {
+                    let _ = self.app.emit("pipeline-error", format!("transcript insert: {e}"));
+                    return;
+                }
+                let id = conn.last_insert_rowid();
+                *self.last_line_id.lock().unwrap() = Some(id);
+                (id, "append")
             }
             CaptionAction::Update => {
                 let existing_id = *self.last_line_id.lock().unwrap();
@@ -108,9 +117,10 @@ impl CaptionPipeline {
                         let _ = self.app.emit("pipeline-error", format!("transcript update: {e}"));
                         return;
                     }
-                    existing_id
+                    (existing_id, "update")
                 } else {
-                    // No previous line — fall back to INSERT
+                    // No previous line — fall back to INSERT and treat as new_block
+                    // so the frontend appends rather than replacing the last visible line.
                     let conn = self.db.lock().unwrap();
                     if let Err(e) = conn.execute(
                         "INSERT INTO transcript_lines (meeting_id, text, timestamp_ms, speaker_label) \
@@ -122,7 +132,7 @@ impl CaptionPipeline {
                     }
                     let id = conn.last_insert_rowid();
                     *self.last_line_id.lock().unwrap() = Some(id);
-                    id
+                    (id, "new_block")
                 }
             }
         };
