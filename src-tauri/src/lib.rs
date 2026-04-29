@@ -9,9 +9,28 @@ mod translation;
 use commands::pipeline::PipelineState;
 use db::open_app_db;
 use dictionary::EcdictDictionary;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use tauri::{Manager, path::BaseDirectory};
+use tauri::{AppHandle, Manager, path::BaseDirectory};
 use translation::TranslationState;
+
+/// Find the web dashboard's built static files.
+/// Checks the app bundle resources first, then the workspace root in dev mode.
+fn find_web_dist(app: &AppHandle) -> Option<PathBuf> {
+    // Bundled app: resource directory contains web/dist
+    if let Ok(p) = app.path().resolve("web/dist", BaseDirectory::Resource) {
+        if p.exists() { return Some(p); }
+    }
+    // Dev mode: exe is at target/debug/learncaption — walk up to workspace root
+    if let Ok(exe) = std::env::current_exe() {
+        // exe → target/debug → target → workspace root
+        if let Some(root) = exe.parent().and_then(|p| p.parent()).and_then(|p| p.parent()) {
+            let p = root.join("web/dist");
+            if p.exists() { return Some(p); }
+        }
+    }
+    None
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -25,9 +44,6 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_sql::Builder::default().build())
         .setup(|app| {
-            // Start HTTP server (GET /status for extension, future web dashboard API)
-            tauri::async_runtime::spawn(http_server::run(ws_task_for_http));
-
             // On macOS: convert window to a NonactivatingPanel so clicks are received
             // without the window ever becoming the key window. This prevents macOS from
             // switching WKWebView compositing mode on activation, which caused the
@@ -55,19 +71,32 @@ pub fn run() {
                 }
             }
 
-            // Open SQLite DB
+            // Open SQLite DB (must happen before HTTP server so it can share the handle)
             let db = open_app_db(app.handle())?;
-            app.manage(db);
 
             // Load ECDICT dictionary into memory (read-only, shared via Arc)
             let ecdict_path = app
                 .path()
                 .resolve("resources/ecdict.db", BaseDirectory::Resource)?;
-            let dict = EcdictDictionary::load(
+            let dict = Arc::new(EcdictDictionary::load(
                 ecdict_path.to_str().ok_or("ECDICT path is not valid UTF-8")?,
                 100_000,
-            )?;
-            app.manage(Arc::new(dict));
+            )?);
+
+            // Start HTTP server with full REST API + optional static file serving
+            let static_dir = find_web_dist(app.handle());
+            if static_dir.is_none() {
+                eprintln!("[LearnCaption] web/dist not found — serving API only (run `cd web && npm run build` to enable the dashboard)");
+            }
+            tauri::async_runtime::spawn(http_server::run(
+                ws_task_for_http,
+                db.clone(),
+                dict.clone(),
+                static_dir,
+            ));
+
+            app.manage(db);
+            app.manage(dict);
 
             Ok(())
         })
