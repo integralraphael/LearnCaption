@@ -51,6 +51,9 @@ pub async fn run(
         .route("/vocab", post(add_vocab_handler))
         .route("/vocab/:id/master", post(mark_mastered_handler))
         .route("/vocab/:id/unmaster", post(mark_unmastered_handler))
+        .route("/vocab/:id/familiarity", post(set_familiarity_handler))
+        .route("/vocab/:id/definition", post(set_definition_handler))
+        .route("/vocab/:id", axum::routing::delete(delete_vocab_handler))
         .route("/vocab/:id/sentences", get(get_vocab_sentences_handler))
         .route("/word/:word", get(query_word_handler))
         .route("/tts", post(tts_handler))
@@ -291,6 +294,71 @@ async fn get_vocab_sentences_handler(
         .map_err(|e| db_err(e))?;
         Ok(Json(rows))
     })
+}
+
+async fn delete_vocab_handler(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> impl IntoResponse {
+    let result = block_in_place(|| {
+        let conn = state.db.lock().map_err(|e| e.to_string())?;
+        conn.execute("DELETE FROM vocabulary WHERE id = ?1", rusqlite::params![id])
+            .map_err(|e| e.to_string())?;
+        Ok::<_, String>(())
+    });
+    match result {
+        Ok(()) => (StatusCode::OK, Json(json!({ "ok": true }))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e }))),
+    }
+}
+
+#[derive(Deserialize)]
+struct SetFamiliarityBody {
+    level: i64,
+}
+
+async fn set_familiarity_handler(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(body): Json<SetFamiliarityBody>,
+) -> impl IntoResponse {
+    let level = body.level.clamp(0, 5);
+    let result = block_in_place(|| {
+        let conn = state.db.lock().map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE vocabulary SET familiarity = ?1 WHERE id = ?2",
+            rusqlite::params![level, id],
+        ).map_err(|e| e.to_string())?;
+        Ok::<_, String>(())
+    });
+    match result {
+        Ok(()) => (StatusCode::OK, Json(json!({ "ok": true }))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e }))),
+    }
+}
+
+#[derive(Deserialize)]
+struct SetDefinitionBody {
+    definition: String,
+}
+
+async fn set_definition_handler(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(body): Json<SetDefinitionBody>,
+) -> impl IntoResponse {
+    let result = block_in_place(|| {
+        let conn = state.db.lock().map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE vocabulary SET definition = ?1 WHERE id = ?2",
+            rusqlite::params![body.definition, id],
+        ).map_err(|e| e.to_string())?;
+        Ok::<_, String>(())
+    });
+    match result {
+        Ok(()) => (StatusCode::OK, Json(json!({ "ok": true }))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e }))),
+    }
 }
 
 // ── Word lookup ───────────────────────────────────────────────────────────────

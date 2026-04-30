@@ -1,36 +1,185 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api, VocabEntry, VocabSentence } from '../api'
 
 type SortKey = 'occurrenceCount' | 'addedAt' | 'familiarity' | 'entry'
 type Filter = 'all' | 'mastered' | 'unmastered'
 
-function FamiliarityDots({ level }: { level: number }) {
+// ── Familiarity dots (clickable) ──────────────────────────────────────────────
+
+interface FamiliarityDotsProps {
+  level: number
+  onSet?: (level: number) => void
+}
+
+function FamiliarityDots({ level, onSet }: FamiliarityDotsProps) {
+  const [hovered, setHovered] = useState(0)
+  const interactive = !!onSet
+  const display = interactive && hovered ? hovered : level
+
   return (
-    <span style={{ display: 'inline-flex', gap: '3px' }}>
+    <span style={{ display: 'inline-flex', gap: '4px' }}>
       {[1, 2, 3, 4, 5].map((i) => (
         <span
           key={i}
+          title={interactive ? `Set familiarity to ${i}` : undefined}
           style={{
-            width: '8px', height: '8px', borderRadius: '50%',
-            background: i <= level ? '#3b82f6' : '#334155',
-            display: 'inline-block',
+            width: '9px', height: '9px', borderRadius: '50%',
+            display: 'inline-block', transition: 'background 0.1s',
+            background: i <= display ? '#3b82f6' : '#334155',
+            cursor: interactive ? 'pointer' : 'default',
           }}
+          onMouseEnter={() => interactive && setHovered(i)}
+          onMouseLeave={() => interactive && setHovered(0)}
+          onClick={(e) => { e.stopPropagation(); onSet?.(i) }}
         />
       ))}
     </span>
   )
 }
 
-interface EntryRowProps {
-  entry: VocabEntry
-  onMastered: (id: number) => void
-  onUnmastered: (id: number) => void
+// ── Add word modal ────────────────────────────────────────────────────────────
+
+interface AddWordModalProps {
+  onClose: () => void
+  onAdded: (entry: VocabEntry) => void
 }
 
-function EntryRow({ entry, onMastered, onUnmastered }: EntryRowProps) {
+function AddWordModal({ onClose, onAdded }: AddWordModalProps) {
+  const [word, setWord] = useState('')
+  const [definition, setDefinition] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [looked, setLooked] = useState(false)
+  const wordRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => { wordRef.current?.focus() }, [])
+
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', h)
+    return () => window.removeEventListener('keydown', h)
+  }, [onClose])
+
+  const lookup = async () => {
+    if (!word.trim()) return
+    const res = await api.word(word.trim())
+    if (res.definition) setDefinition(res.definition)
+    setLooked(true)
+  }
+
+  const submit = async () => {
+    if (!word.trim()) return
+    setLoading(true)
+    const entry = await api.addVocab(word.trim(), definition, 'word')
+    onAdded(entry)
+    onClose()
+  }
+
+  return (
+    <div
+      style={{
+        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+        background: 'rgba(0,0,0,0.6)', display: 'flex',
+        alignItems: 'center', justifyContent: 'center', zIndex: 9999,
+      }}
+      onMouseDown={onClose}
+    >
+      <div
+        style={{
+          background: '#1e293b', border: '1px solid #334155', borderRadius: '12px',
+          padding: '24px', width: '420px', maxWidth: '92vw',
+          boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
+        }}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <h3 style={{ margin: '0 0 20px', fontSize: '16px', color: '#f1f5f9' }}>Add word</h3>
+
+        <div style={{ marginBottom: '12px' }}>
+          <label style={{ fontSize: '12px', color: '#64748b', display: 'block', marginBottom: '4px' }}>Word</label>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <input
+              ref={wordRef}
+              value={word}
+              onChange={(e) => { setWord(e.target.value); setLooked(false) }}
+              onKeyDown={(e) => e.key === 'Enter' && lookup()}
+              placeholder="e.g. effortlessly"
+              style={{
+                flex: 1, padding: '8px 12px', borderRadius: '7px',
+                border: '1px solid #334155', background: '#0f172a',
+                color: '#e2e8f0', fontSize: '14px', outline: 'none',
+              }}
+            />
+            <button
+              onClick={lookup}
+              style={{
+                padding: '8px 14px', borderRadius: '7px', border: 'none',
+                background: '#334155', color: '#94a3b8', cursor: 'pointer', fontSize: '13px',
+              }}
+            >
+              Look up
+            </button>
+          </div>
+        </div>
+
+        <div style={{ marginBottom: '20px' }}>
+          <label style={{ fontSize: '12px', color: '#64748b', display: 'block', marginBottom: '4px' }}>
+            Definition {looked && !definition && <span style={{ color: '#f59e0b' }}>— not found in dictionary</span>}
+          </label>
+          <textarea
+            value={definition}
+            onChange={(e) => setDefinition(e.target.value)}
+            placeholder="Enter definition (optional)"
+            rows={3}
+            style={{
+              width: '100%', padding: '8px 12px', borderRadius: '7px',
+              border: '1px solid #334155', background: '#0f172a',
+              color: '#e2e8f0', fontSize: '14px', outline: 'none',
+              resize: 'vertical', boxSizing: 'border-box',
+            }}
+          />
+        </div>
+
+        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+          <button
+            onClick={onClose}
+            style={{
+              padding: '8px 16px', borderRadius: '7px', border: 'none',
+              background: '#334155', color: '#94a3b8', cursor: 'pointer', fontSize: '13px',
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={submit}
+            disabled={!word.trim() || loading}
+            style={{
+              padding: '8px 16px', borderRadius: '7px', border: 'none',
+              background: word.trim() ? '#3b82f6' : '#1e3a5f',
+              color: '#fff', cursor: word.trim() ? 'pointer' : 'default',
+              fontSize: '13px', fontWeight: 500,
+            }}
+          >
+            {loading ? 'Adding…' : 'Add'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Entry row ─────────────────────────────────────────────────────────────────
+
+interface EntryRowProps {
+  entry: VocabEntry
+  onUpdate: (id: number, patch: Partial<VocabEntry>) => void
+  onDelete: (id: number) => void
+}
+
+function EntryRow({ entry, onUpdate, onDelete }: EntryRowProps) {
   const [expanded, setExpanded] = useState(false)
   const [sentences, setSentences] = useState<VocabSentence[]>([])
   const [loadingSentences, setLoadingSentences] = useState(false)
+  const [editingDef, setEditingDef] = useState(false)
+  const [draftDef, setDraftDef] = useState(entry.definition ?? '')
 
   const toggleExpand = () => {
     if (!expanded && sentences.length === 0) {
@@ -45,6 +194,33 @@ function EntryRow({ entry, onMastered, onUnmastered }: EntryRowProps) {
 
   const isMastered = entry.masteredAt !== null
 
+  const toggleMastered = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (isMastered) {
+      api.unmarkMastered(entry.id).then(() => onUpdate(entry.id, { familiarity: 0, masteredAt: null }))
+    } else {
+      api.markMastered(entry.id).then(() => onUpdate(entry.id, { familiarity: 5, masteredAt: new Date().toISOString() }))
+    }
+  }
+
+  const setFamiliarity = (level: number) => {
+    api.setFamiliarity(entry.id, level).then(() => onUpdate(entry.id, { familiarity: level }))
+  }
+
+  const saveDef = () => {
+    api.setDefinition(entry.id, draftDef).then(() => {
+      onUpdate(entry.id, { definition: draftDef || null })
+      setEditingDef(false)
+    })
+  }
+
+  const confirmDelete = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (window.confirm(`Delete "${entry.entry}" from vocab book?`)) {
+      api.deleteVocab(entry.id).then(() => onDelete(entry.id))
+    }
+  }
+
   return (
     <>
       <tr
@@ -55,81 +231,127 @@ function EntryRow({ entry, onMastered, onUnmastered }: EntryRowProps) {
           borderBottom: '1px solid #1e293b',
         }}
       >
+        {/* Word */}
         <td style={{ padding: '10px 16px', color: isMastered ? '#475569' : '#e2e8f0', fontWeight: 500 }}>
           <span style={{ textDecoration: isMastered ? 'line-through' : 'none' }}>
             {entry.entry}
           </span>
         </td>
-        <td style={{ padding: '10px 16px', color: '#94a3b8', fontSize: '13px', maxWidth: '300px' }}>
-          {entry.definition ?? '—'}
+
+        {/* Definition (truncated) */}
+        <td style={{
+          padding: '10px 16px', color: '#94a3b8', fontSize: '13px',
+          maxWidth: '280px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>
+          {entry.definition ?? <span style={{ color: '#334155' }}>—</span>}
         </td>
+
+        {/* Seen count */}
         <td style={{ padding: '10px 16px', color: '#64748b', textAlign: 'center' }}>
           {entry.occurrenceCount}
         </td>
-        <td style={{ padding: '10px 16px', textAlign: 'center' }}>
-          <FamiliarityDots level={entry.familiarity} />
+
+        {/* Familiarity (clickable dots) */}
+        <td style={{ padding: '10px 16px', textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
+          <FamiliarityDots level={entry.familiarity} onSet={setFamiliarity} />
         </td>
+
+        {/* Added date */}
         <td style={{ padding: '10px 16px', color: '#64748b', fontSize: '12px' }}>
           {new Date(entry.addedAt).toLocaleDateString()}
         </td>
-        {/* Mastered toggle — directly in row, no expand needed */}
-        <td
-          style={{ padding: '10px 12px', textAlign: 'center', width: '40px' }}
-          onClick={(e) => e.stopPropagation()}
-        >
+
+        {/* Actions */}
+        <td style={{ padding: '10px 8px', textAlign: 'right', whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
+          {/* Mastered toggle */}
           <button
-            title={isMastered ? 'Click to unmark' : 'Mark as mastered'}
-            onClick={() => isMastered ? onUnmastered(entry.id) : onMastered(entry.id)}
+            title={isMastered ? 'Click to unmark mastered' : 'Mark as mastered'}
+            onClick={toggleMastered}
             style={{
-              width: '28px', height: '28px', borderRadius: '50%', border: 'none',
+              width: '26px', height: '26px', borderRadius: '50%', border: 'none',
               cursor: 'pointer',
               background: isMastered ? '#10b981' : '#1e293b',
               color: isMastered ? '#fff' : '#475569',
-              fontSize: '14px', display: 'flex', alignItems: 'center',
-              justifyContent: 'center', transition: 'all 0.15s',
+              fontSize: '13px', marginRight: '4px',
             }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = isMastered ? '#059669' : '#334155'
+          >✓</button>
+
+          {/* Delete */}
+          <button
+            title="Delete"
+            onClick={confirmDelete}
+            style={{
+              width: '26px', height: '26px', borderRadius: '50%', border: 'none',
+              cursor: 'pointer', background: '#1e293b', color: '#475569', fontSize: '13px',
             }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = isMastered ? '#10b981' : '#1e293b'
-            }}
-          >
-            ✓
-          </button>
+            onMouseEnter={(e) => { e.currentTarget.style.background = '#7f1d1d'; e.currentTarget.style.color = '#fca5a5' }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = '#1e293b'; e.currentTarget.style.color = '#475569' }}
+          >✕</button>
         </td>
       </tr>
+
+      {/* Expanded panel */}
       {expanded && (
-        <tr style={{ background: '#0f172a' }}>
-          <td colSpan={6} style={{ padding: '12px 16px 16px 32px' }}>
-            <div style={{ display: 'flex', gap: '12px', marginBottom: '12px' }}>
+        <tr style={{ background: '#0a1628' }}>
+          <td colSpan={6} style={{ padding: '14px 16px 18px 32px' }}>
+            {/* Quick actions */}
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '14px', flexWrap: 'wrap' }}>
               <button
-                style={{
-                  padding: '5px 14px', borderRadius: '6px', border: 'none',
-                  background: '#0ea5e9', color: '#fff', cursor: 'pointer', fontSize: '13px',
-                }}
+                style={{ padding: '5px 14px', borderRadius: '6px', border: 'none', background: '#0ea5e9', color: '#fff', cursor: 'pointer', fontSize: '13px' }}
                 onClick={(e) => { e.stopPropagation(); api.tts(entry.entry) }}
-              >
-                🔊 Pronounce
-              </button>
+              >🔊 Pronounce</button>
+              <button
+                style={{ padding: '5px 14px', borderRadius: '6px', border: 'none', background: '#334155', color: '#94a3b8', cursor: 'pointer', fontSize: '13px' }}
+                onClick={(e) => { e.stopPropagation(); setEditingDef(true); setDraftDef(entry.definition ?? '') }}
+              >✎ Edit definition</button>
             </div>
+
+            {/* Inline definition editor */}
+            {editingDef && (
+              <div style={{ marginBottom: '14px' }} onClick={(e) => e.stopPropagation()}>
+                <textarea
+                  value={draftDef}
+                  onChange={(e) => setDraftDef(e.target.value)}
+                  rows={3}
+                  autoFocus
+                  style={{
+                    width: '100%', padding: '8px 12px', borderRadius: '7px',
+                    border: '1px solid #3b82f6', background: '#0f172a',
+                    color: '#e2e8f0', fontSize: '13px', outline: 'none',
+                    resize: 'vertical', boxSizing: 'border-box', marginBottom: '8px',
+                  }}
+                />
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button
+                    onClick={saveDef}
+                    style={{ padding: '5px 14px', borderRadius: '6px', border: 'none', background: '#3b82f6', color: '#fff', cursor: 'pointer', fontSize: '13px' }}
+                  >Save</button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setEditingDef(false) }}
+                    style={{ padding: '5px 14px', borderRadius: '6px', border: 'none', background: '#334155', color: '#94a3b8', cursor: 'pointer', fontSize: '13px' }}
+                  >Cancel</button>
+                </div>
+              </div>
+            )}
+
+            {/* Example sentences */}
             {loadingSentences ? (
               <p style={{ color: '#64748b', fontSize: '13px', margin: 0 }}>Loading sentences…</p>
             ) : sentences.length === 0 ? (
-              <p style={{ color: '#475569', fontSize: '13px', margin: 0 }}>No example sentences yet.</p>
+              <p style={{ color: '#334155', fontSize: '13px', margin: 0 }}>No example sentences yet.</p>
             ) : (
               <>
-                <p style={{ color: '#64748b', fontSize: '12px', margin: '0 0 8px' }}>Example sentences:</p>
+                <p style={{ color: '#475569', fontSize: '12px', margin: '0 0 8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Example sentences</p>
                 {sentences.map((s) => (
-                  <div key={s.lineId} style={{ marginBottom: '8px' }}>
-                    <p style={{ color: '#cbd5e1', fontSize: '13px', margin: '0 0 2px' }}>
+                  <div key={s.lineId} style={{ marginBottom: '10px', paddingLeft: '12px', borderLeft: '2px solid #1e293b' }}>
+                    <p style={{ color: '#cbd5e1', fontSize: '13px', margin: '0 0 3px', lineHeight: 1.6 }}>
                       {s.text.split(new RegExp(`(${entry.entry})`, 'i')).map((part, i) =>
                         part.toLowerCase() === entry.entry.toLowerCase()
                           ? <strong key={i} style={{ color: '#fbbf24' }}>{part}</strong>
                           : <span key={i}>{part}</span>
                       )}
                     </p>
-                    <span style={{ color: '#475569', fontSize: '11px' }}>{s.meetingTitle}</span>
+                    <span style={{ color: '#334155', fontSize: '11px' }}>{s.meetingTitle}</span>
                   </div>
                 ))}
               </>
@@ -141,6 +363,8 @@ function EntryRow({ entry, onMastered, onUnmastered }: EntryRowProps) {
   )
 }
 
+// ── Main page ─────────────────────────────────────────────────────────────────
+
 export default function Vocab() {
   const [entries, setEntries] = useState<VocabEntry[]>([])
   const [loading, setLoading] = useState(true)
@@ -148,25 +372,22 @@ export default function Vocab() {
   const [sortAsc, setSortAsc] = useState(false)
   const [filter, setFilter] = useState<Filter>('all')
   const [search, setSearch] = useState('')
+  const [showAdd, setShowAdd] = useState(false)
 
   useEffect(() => {
     api.vocab().then((data) => { setEntries(data); setLoading(false) })
   }, [])
 
-  const handleMastered = (id: number) => {
-    api.markMastered(id).then(() => {
-      setEntries((prev) =>
-        prev.map((e) => e.id === id ? { ...e, familiarity: 5, masteredAt: new Date().toISOString() } : e)
-      )
-    })
+  const handleUpdate = (id: number, patch: Partial<VocabEntry>) => {
+    setEntries((prev) => prev.map((e) => e.id === id ? { ...e, ...patch } : e))
   }
 
-  const handleUnmastered = (id: number) => {
-    api.unmarkMastered(id).then(() => {
-      setEntries((prev) =>
-        prev.map((e) => e.id === id ? { ...e, familiarity: 0, masteredAt: null } : e)
-      )
-    })
+  const handleDelete = (id: number) => {
+    setEntries((prev) => prev.filter((e) => e.id !== id))
+  }
+
+  const handleAdded = (entry: VocabEntry) => {
+    setEntries((prev) => [entry, ...prev])
   }
 
   const sortedFiltered = entries
@@ -206,7 +427,7 @@ export default function Vocab() {
   return (
     <div style={{ padding: '20px', height: 'calc(100vh - 49px)', overflowY: 'auto' }}>
       {/* Toolbar */}
-      <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
+      <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
         <input
           type="text"
           placeholder="Search…"
@@ -231,9 +452,17 @@ export default function Vocab() {
             {f.charAt(0).toUpperCase() + f.slice(1)}
           </button>
         ))}
-        <span style={{ color: '#475569', fontSize: '13px', marginLeft: 'auto' }}>
-          {sortedFiltered.length} entries
-        </span>
+        <span style={{ color: '#334155', fontSize: '13px' }}>{sortedFiltered.length} entries</span>
+
+        <button
+          onClick={() => setShowAdd(true)}
+          style={{
+            marginLeft: 'auto', padding: '6px 16px', borderRadius: '7px', border: 'none',
+            background: '#3b82f6', color: '#fff', cursor: 'pointer', fontSize: '13px', fontWeight: 500,
+          }}
+        >
+          + Add word
+        </button>
       </div>
 
       {/* Table */}
@@ -253,21 +482,23 @@ export default function Vocab() {
             <th style={thStyle('addedAt')} onClick={() => toggleSort('addedAt')}>
               Added {sortKey === 'addedAt' ? (sortAsc ? '↑' : '↓') : ''}
             </th>
-            <th style={{ ...thStyle('entry'), cursor: 'default', width: '40px' }} />
+            <th style={{ width: '72px' }} />
           </tr>
         </thead>
         <tbody>
           {sortedFiltered.length === 0 ? (
             <tr>
-              <td colSpan={6} style={{ padding: '40px', textAlign: 'center', color: '#475569' }}>
+              <td colSpan={6} style={{ padding: '40px', textAlign: 'center', color: '#334155' }}>
                 No entries found.
               </td>
             </tr>
           ) : sortedFiltered.map((e) => (
-            <EntryRow key={e.id} entry={e} onMastered={handleMastered} onUnmastered={handleUnmastered} />
+            <EntryRow key={e.id} entry={e} onUpdate={handleUpdate} onDelete={handleDelete} />
           ))}
         </tbody>
       </table>
+
+      {showAdd && <AddWordModal onClose={() => setShowAdd(false)} onAdded={handleAdded} />}
     </div>
   )
 }
