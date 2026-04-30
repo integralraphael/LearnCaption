@@ -67,6 +67,12 @@ pub async fn run(listener: TcpListener, pipeline: Arc<CaptionPipeline>) {
                     Some(m) => m,
                     None => continue,
                 };
+                if msg.msg_type == "meeting_title" {
+                    if let Some(title) = &msg.text {
+                        pipeline.update_meeting_title(title);
+                    }
+                    continue;
+                }
                 if msg.msg_type != "caption" {
                     continue;
                 }

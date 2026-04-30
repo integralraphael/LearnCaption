@@ -39,6 +39,26 @@ if (window.__learnCaptionAttached) {
     safeSend({ type: "caption", text: trimmed, speaker, avatar, action, platform: "meet" });
   }
 
+  function getMeetingTitle() {
+    // data-meeting-title attribute is most reliable
+    const el = document.querySelector('[data-meeting-title]');
+    if (el) {
+      const t = el.getAttribute('data-meeting-title')?.trim();
+      if (t) return t;
+    }
+    // Fallback: visible heading text
+    const heading = document.querySelector('.u6vdEc.ouH3xe');
+    return heading?.textContent?.trim() || null;
+  }
+
+  function sendMeetingTitle() {
+    const title = getMeetingTitle();
+    if (title) {
+      console.log("[LearnCaption] meeting title:", title);
+      safeSend({ type: "meeting_title", title });
+    }
+  }
+
   function getCaptionContainer() {
     return document.querySelector('[aria-label="字幕"][role="region"]') ||
            document.querySelector('[aria-label="Captions"][role="region"]') ||
@@ -150,9 +170,7 @@ if (window.__learnCaptionAttached) {
     captionObserver.observe(container, { childList: true, subtree: true, characterData: true });
     isObserving = true;
     console.log("[LearnCaption] CC enabled — observing captions");
-    // Don't pre-populate blockState here. Letting the first processBlock run with
-    // empty stored state ensures currently-visible sentences are actually sent,
-    // rather than silently skipped as "already seen".
+    sendMeetingTitle();
     flushActive();
     startReconnect();
   }

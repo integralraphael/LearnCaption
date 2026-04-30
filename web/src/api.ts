@@ -57,6 +57,7 @@ async function post<T>(path: string, body?: unknown): Promise<T> {
 
 export const api = {
   meetings: () => get<Meeting[]>('/meetings'),
+  renameMeeting: (id: number, title: string) => post<{ ok: boolean }>(`/meetings/${id}/title`, { title }),
   transcript: (id: number) => get<TranscriptLine[]>(`/meetings/${id}/transcript`),
   vocab: () => get<VocabEntry[]>('/vocab'),
   addVocab: (entry: string, definition: string, entryType = 'word') =>

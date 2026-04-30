@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api, Meeting, TranscriptLine, WordResult } from '../api'
 
 function formatDate(s: string) {
@@ -218,6 +218,81 @@ function TranscriptView({ meetingId }: TranscriptViewProps) {
   )
 }
 
+function MeetingItem({
+  meeting, selected, onSelect, onRename,
+}: {
+  meeting: Meeting
+  selected: boolean
+  onSelect: () => void
+  onRename: (id: number, title: string) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(meeting.title)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  const startEdit = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setDraft(meeting.title)
+    setEditing(true)
+    setTimeout(() => { inputRef.current?.select() }, 0)
+  }
+
+  const commit = () => {
+    const trimmed = draft.trim()
+    if (trimmed && trimmed !== meeting.title) {
+      api.renameMeeting(meeting.id, trimmed).then(() => onRename(meeting.id, trimmed))
+    }
+    setEditing(false)
+  }
+
+  return (
+    <div
+      onClick={onSelect}
+      style={{
+        padding: '12px 14px', cursor: 'pointer', borderBottom: '1px solid #1e293b',
+        background: selected ? '#1e293b' : 'transparent',
+        borderLeft: selected ? '3px solid #3b82f6' : '3px solid transparent',
+      }}
+    >
+      {editing ? (
+        <input
+          ref={inputRef}
+          value={draft}
+          autoFocus
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditing(false) }}
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            width: '100%', boxSizing: 'border-box',
+            background: '#0f172a', border: '1px solid #3b82f6', borderRadius: '5px',
+            color: '#f1f5f9', fontSize: '14px', fontWeight: 500,
+            padding: '2px 6px', outline: 'none', marginBottom: '4px',
+          }}
+        />
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+          <span style={{ fontSize: '14px', fontWeight: 500, color: '#e2e8f0', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {meeting.title}
+          </span>
+          <button
+            onClick={startEdit}
+            title="Rename"
+            style={{
+              flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer',
+              color: '#334155', fontSize: '13px', padding: '0 2px', lineHeight: 1,
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = '#94a3b8')}
+            onMouseLeave={(e) => (e.currentTarget.style.color = '#334155')}
+          >✎</button>
+        </div>
+      )}
+      <div style={{ fontSize: '12px', color: '#64748b' }}>{formatDate(meeting.startedAt)}</div>
+      <div style={{ fontSize: '12px', color: '#475569' }}>{duration(meeting)}</div>
+    </div>
+  )
+}
+
 export default function Meetings() {
   const [meetings, setMeetings] = useState<Meeting[]>([])
   const [selected, setSelected] = useState<number | null>(null)
@@ -231,6 +306,10 @@ export default function Meetings() {
     })
   }, [])
 
+  const handleRename = (id: number, title: string) => {
+    setMeetings((prev) => prev.map((m) => m.id === id ? { ...m, title } : m))
+  }
+
   if (loading) return <p style={{ color: '#64748b', padding: '20px' }}>Loading…</p>
 
   return (
@@ -243,21 +322,13 @@ export default function Meetings() {
         {meetings.length === 0 ? (
           <p style={{ color: '#475569', padding: '20px', fontSize: '14px' }}>No meetings yet.</p>
         ) : meetings.map((m) => (
-          <div
+          <MeetingItem
             key={m.id}
-            onClick={() => setSelected(m.id)}
-            style={{
-              padding: '14px 16px', cursor: 'pointer', borderBottom: '1px solid #1e293b',
-              background: selected === m.id ? '#1e293b' : 'transparent',
-              borderLeft: selected === m.id ? '3px solid #3b82f6' : '3px solid transparent',
-            }}
-          >
-            <div style={{ fontSize: '14px', fontWeight: 500, color: '#e2e8f0', marginBottom: '4px' }}>
-              {m.title}
-            </div>
-            <div style={{ fontSize: '12px', color: '#64748b' }}>{formatDate(m.startedAt)}</div>
-            <div style={{ fontSize: '12px', color: '#475569' }}>{duration(m)}</div>
-          </div>
+            meeting={m}
+            selected={selected === m.id}
+            onSelect={() => setSelected(m.id)}
+            onRename={handleRename}
+          />
         ))}
       </div>
 

@@ -46,6 +46,7 @@ pub async fn run(
     let api_router = Router::new()
         .route("/status", get(status_handler))
         .route("/meetings", get(list_meetings_handler))
+        .route("/meetings/:id/title", post(rename_meeting_handler))
         .route("/meetings/:id/transcript", get(get_transcript_handler))
         .route("/vocab", get(list_vocab_handler))
         .route("/vocab", post(add_vocab_handler))
@@ -89,7 +90,7 @@ async fn status_handler(State(state): State<AppState>) -> Json<Value> {
     Json(json!({ "capturing": capturing }))
 }
 
-// ── Meetings ──────────────────────────────────────────────────────────────────
+// ── Meetings ─────────────────────────────────────────────────────────────────
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -98,6 +99,30 @@ struct MeetingDto {
     title: String,
     started_at: String,
     ended_at: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct RenameMeetingBody {
+    title: String,
+}
+
+async fn rename_meeting_handler(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(body): Json<RenameMeetingBody>,
+) -> impl IntoResponse {
+    let result = block_in_place(|| {
+        let conn = state.db.lock().map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE meetings SET title = ?1 WHERE id = ?2",
+            rusqlite::params![body.title.trim(), id],
+        ).map_err(|e| e.to_string())?;
+        Ok::<_, String>(())
+    });
+    match result {
+        Ok(()) => (StatusCode::OK, Json(json!({ "ok": true }))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e }))),
+    }
 }
 
 async fn list_meetings_handler(State(state): State<AppState>) -> ApiResult<Vec<MeetingDto>> {

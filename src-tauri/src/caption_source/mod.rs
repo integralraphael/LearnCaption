@@ -65,6 +65,18 @@ impl CaptionPipeline {
         &self.app
     }
 
+    pub fn update_meeting_title(&self, title: &str) {
+        let meeting_id = match *self.meeting_id.lock().unwrap() {
+            Some(id) => id,
+            None => return,
+        };
+        let conn = self.db.lock().unwrap();
+        let _ = conn.execute(
+            "UPDATE meetings SET title = ?1 WHERE id = ?2",
+            rusqlite::params![title, meeting_id],
+        );
+    }
+
     pub fn process(&self, raw: RawCaption) {
         if raw.text.trim().is_empty() {
             return;
