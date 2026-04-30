@@ -61,6 +61,14 @@ export function WordDetail({ word, context, isPhrase, onClose, onAddToVocab }: P
       if (cancelled) return;
       setEcdictResult(r);
 
+      // If word is in the vocab book, use the user's definition — skip AI entirely.
+      // The vocab book definition is authoritative: the user either manually set it
+      // or confirmed it, so AI output would only add noise.
+      if (r.vocabEntry) {
+        setTranslation(r.vocabEntry.definition ?? r.definition ?? null);
+        return;
+      }
+
       // Show ECDICT definition immediately while AI runs (or if AI isn't triggered)
       if (r.definition) setTranslation(r.definition);
 
