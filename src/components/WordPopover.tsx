@@ -18,14 +18,32 @@ export async function openWordPopover(opts: PopoverOptions) {
   await closeWordPopover();
 
   const mainWin = getCurrentWindow();
-  const mainPos = await mainWin.outerPosition();
-  const scaleFactor = await mainWin.scaleFactor();
+  const [mainPos, mainSize, scaleFactor] = await Promise.all([
+    mainWin.outerPosition(),
+    mainWin.outerSize(),
+    mainWin.scaleFactor(),
+  ]);
 
-  // Position above the clicked word
+  const mainX = mainPos.x / scaleFactor;
+  const mainY = mainPos.y / scaleFactor;
+  const mainW = mainSize.width / scaleFactor;
+  const mainH = mainSize.height / scaleFactor;
+
   const popoverWidth = 300;
-  const popoverHeight = 220;
-  const x = Math.round(mainPos.x / scaleFactor + opts.anchorX - popoverWidth / 2);
-  const y = Math.round(mainPos.y / scaleFactor - popoverHeight - 8);
+  const popoverHeight = 280;
+
+  // Horizontally: centered on the clicked word, clamped inside the main window
+  const x = Math.round(
+    Math.max(mainX, Math.min(mainX + mainW - popoverWidth,
+      mainX + opts.anchorX - popoverWidth / 2))
+  );
+
+  // Vertically: overlap the bottom of the main window by 20px so it looks attached.
+  // If the popover would go off-screen below, flip it to overlap the top instead.
+  const yBelow = Math.round(mainY + mainH - 20);
+  const yAbove = Math.round(mainY - popoverHeight + 20);
+  const spaceBelow = window.screen.height - yBelow - popoverHeight;
+  const y = spaceBelow >= 0 ? yBelow : yAbove;
 
   const base = window.location.origin;
   popoverWindow = new WebviewWindow("word-detail", {
