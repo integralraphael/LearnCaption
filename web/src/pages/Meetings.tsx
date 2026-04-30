@@ -298,35 +298,15 @@ function TranscriptView({ meeting, onConfigChange }: TranscriptViewProps) {
     }).catch(() => {})
   }, [lines])
 
-  // Combined auto-translate effect:
-  // - translationMode === 'all' → translate every line
-  // - showVocab || showDifficult → translate lines containing those highlighted words
+  // Auto-translate effect #1: translationMode === 'all' → translate every line sequentially
   useEffect(() => {
-    if (lines.length === 0) return
-    const wantAll = config.translationMode === 'all'
-    const wantVocab = config.showVocab || config.showDifficult
-
-    if (!wantAll && (!wantVocab || !annotated)) return
-
+    if (config.translationMode !== 'all' || lines.length === 0) return
     let cancelled = false
 
-    const todo = lines.filter((line, i) => {
-      // Skip if already queued/done this session
-      if (translatedInSession.current.has(line.id)) return false
-      if (wantAll) return true
-      // Vocab/difficult: only lines that contain a matching token
-      const tokens = annotated?.[i]
-      return tokens?.some(t =>
-        (config.showVocab && t.inVocab) || (config.showDifficult && t.difficult)
-      ) ?? false
-    })
-
+    const todo = lines.filter(line => !translatedInSession.current.has(line.id))
     if (todo.length === 0) return
-
-    // Mark all as queued immediately to prevent double-queuing
     todo.forEach(line => translatedInSession.current.add(line.id))
 
-    // Translate one sentence at a time — result appears as each finishes
     ;(async () => {
       for (const line of todo) {
         if (cancelled) break
@@ -341,7 +321,43 @@ function TranscriptView({ meeting, onConfigChange }: TranscriptViewProps) {
     })()
 
     return () => { cancelled = true }
-  }, [config.translationMode, config.showVocab, config.showDifficult, lines, annotated])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config.translationMode, lines])
+
+  // Auto-translate effect #2: vocab/difficult mode → translate lines with matching tokens
+  // Runs independently so it doesn't cancel the 'all' effect when annotated loads.
+  useEffect(() => {
+    if (!annotated || lines.length === 0) return
+    if (!config.showVocab && !config.showDifficult) return
+    let cancelled = false
+
+    const todo = lines.filter((line, i) => {
+      if (translatedInSession.current.has(line.id)) return false
+      const tokens = annotated[i]
+      return tokens?.some(t =>
+        (config.showVocab && t.inVocab) || (config.showDifficult && t.difficult)
+      ) ?? false
+    })
+
+    if (todo.length === 0) return
+    todo.forEach(line => translatedInSession.current.add(line.id))
+
+    ;(async () => {
+      for (const line of todo) {
+        if (cancelled) break
+        setTranslating(prev => ({ ...prev, [line.id]: true }))
+        try {
+          const r = await api.translate(line.text, [line.id])
+          if (!cancelled && r.translation)
+            setTranslations(prev => ({ ...prev, [line.id]: r.translation! }))
+        } catch {}
+        if (!cancelled) setTranslating(prev => ({ ...prev, [line.id]: false }))
+      }
+    })()
+
+    return () => { cancelled = true }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config.showVocab, config.showDifficult, annotated])
 
   const handleWordClick = (e: React.MouseEvent<HTMLDivElement>) => {
     const target = e.target as HTMLElement
