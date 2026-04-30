@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import { WordDetail } from "./components/WordDetail";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./App.css";
 
 const params = new URLSearchParams(window.location.search);
@@ -29,11 +30,7 @@ function PopoverApp() {
         word={word}
         context={context}
         isPhrase={isPhrase}
-        onClose={() => {
-          import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
-            getCurrentWindow().close();
-          });
-        }}
+        onClose={() => getCurrentWindow().close()}
       />
     </div>
   );

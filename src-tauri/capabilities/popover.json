@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "popover",
+  "description": "Capability for the word-detail popover window",
+  "windows": ["word-detail"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-close"
+  ]
+}

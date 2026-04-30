@@ -11,6 +11,7 @@ interface PopoverOptions {
 }
 
 let popoverWindow: WebviewWindow | null = null;
+let clickUnlisten: (() => void) | null = null;
 
 export async function openWordPopover(opts: PopoverOptions) {
   // Close existing popover
@@ -41,13 +42,22 @@ export async function openWordPopover(opts: PopoverOptions) {
     skipTaskbar: true,
   });
 
-  // Close when the popover window loses focus
+  // Close when the popover window loses focus (clicking another app)
   popoverWindow.onFocusChanged(({ payload: focused }) => {
     if (!focused) closeWordPopover();
   });
+
+  // Close when the user clicks anywhere in the main window
+  const handler = () => closeWordPopover();
+  setTimeout(() => {
+    document.addEventListener("click", handler);
+    clickUnlisten = () => document.removeEventListener("click", handler);
+  }, 0);
 }
 
 export async function closeWordPopover() {
+  clickUnlisten?.();
+  clickUnlisten = null;
   if (popoverWindow) {
     try {
       await popoverWindow.close();
