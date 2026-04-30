@@ -40,6 +40,14 @@ export interface WordResult {
   vocabEntry: VocabEntry | null;
 }
 
+export interface AnnotatedToken {
+  text: string;
+  isWord: boolean;
+  inVocab: boolean;
+  difficult: boolean;
+  definition: string | null;
+}
+
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(BASE + path);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -71,4 +79,7 @@ export const api = {
   vocabSentences: (id: number) => get<VocabSentence[]>(`/vocab/${id}/sentences`),
   word: (word: string) => get<WordResult>(`/word/${encodeURIComponent(word)}`),
   tts: (text: string) => post<{ ok: boolean }>('/tts', { text }),
+  setting: (key: string) => get<{ value: string | null }>(`/settings/${key}`),
+  annotate: (texts: string[]) => post<AnnotatedToken[][]>('/annotate', { texts }),
+  translate: (text: string) => post<{ translation?: string; error?: string }>('/translate', { text }),
 };

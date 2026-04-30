@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { api, Meeting, TranscriptLine, WordResult } from '../api'
+import { api, AnnotatedToken, Meeting, TranscriptLine, WordResult } from '../api'
 
 function SourceBadge({ source }: { source: string }) {
   const isGoogle = source === 'browser'
@@ -177,6 +177,38 @@ function ClickableText({ text }: { text: string }) {
   )
 }
 
+function AnnotatedLineText({
+  tokens,
+}: {
+  tokens: AnnotatedToken[]
+}) {
+  return (
+    <>
+      {tokens.map((token, i) =>
+        token.isWord ? (
+          <span
+            key={i}
+            style={{
+              cursor: 'pointer',
+              borderRadius: '2px',
+              padding: '0 1px',
+              color: token.inVocab ? '#34d399' : token.difficult ? '#fbbf24' : undefined,
+              textDecoration: (token.inVocab || token.difficult) ? 'underline' : undefined,
+              textDecorationStyle: 'dotted',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = '#334155' }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+          >
+            {token.text}
+          </span>
+        ) : (
+          <span key={i}>{token.text}</span>
+        )
+      )}
+    </>
+  )
+}
+
 interface TranscriptViewProps {
   meeting: Meeting
 }
@@ -186,11 +218,32 @@ function TranscriptView({ meeting }: TranscriptViewProps) {
   const [lines, setLines] = useState<TranscriptLine[]>([])
   const [selectedWord, setSelectedWord] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [annotated, setAnnotated] = useState<AnnotatedToken[][] | null>(null)
+  const [translations, setTranslations] = useState<Record<number, string>>({})
+  const [translating, setTranslating] = useState<Record<number, boolean>>({})
+  const [freqThreshold, setFreqThreshold] = useState(3000)
+
+  useEffect(() => {
+    api.setting('ai_translate_frq_threshold')
+      .then(r => setFreqThreshold(parseInt(r.value ?? '3000', 10)))
+      .catch(() => {})
+  }, [])
 
   useEffect(() => {
     setLoading(true)
+    setAnnotated(null)
+    setTranslations({})
+    setTranslating({})
     api.transcript(meetingId).then((data) => { setLines(data); setLoading(false) })
   }, [meetingId])
+
+  useEffect(() => {
+    if (lines.length === 0) return
+    const texts = lines.map(l => l.text)
+    api.annotate(texts).then(result => {
+      setAnnotated(result)
+    }).catch(() => {})
+  }, [lines])
 
   const handleWordClick = (e: React.MouseEvent<HTMLDivElement>) => {
     const target = e.target as HTMLElement
@@ -224,31 +277,74 @@ function TranscriptView({ meeting }: TranscriptViewProps) {
       <div style={{ overflowY: 'auto', flex: 1, padding: '16px' }} onClick={handleWordClick}>
         {loading && <p style={{ color: '#64748b', margin: 0 }}>Loading transcript…</p>}
         {!loading && lines.length === 0 && <p style={{ color: '#64748b', margin: 0 }}>No transcript lines.</p>}
-        {blocks.map((block, bi) => (
-          <div key={bi} style={{ marginBottom: '16px', display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
-            {/* Speaker badge — fixed width column so text aligns */}
-            <span style={{
-              flexShrink: 0, width: '80px', textAlign: 'right',
-              marginTop: '2px',
-              color: '#64748b', fontSize: '12px', fontWeight: 600,
-              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-            }}>
-              {block.speaker ?? ''}
-            </span>
-            {/* Paragraph: all lines joined with a space */}
-            <p style={{
-              margin: 0, color: '#cbd5e1', fontSize: '14px', lineHeight: '1.8',
-              flex: 1,
-            }}>
-              {block.lines.map((line, li) => (
-                <span key={line.id}>
-                  {li > 0 && ' '}
-                  <ClickableText text={line.text} />
+        {blocks.map((block, bi) => {
+          const blockAnnotated = annotated ? block.lines.map((line) => {
+            const idx = lines.findIndex(l => l.id === line.id)
+            return idx >= 0 && annotated[idx] ? annotated[idx] : null
+          }) : null
+
+          return (
+            <div key={bi} style={{ marginBottom: '16px' }}>
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+                {/* Speaker badge — fixed width column so text aligns */}
+                <span style={{
+                  flexShrink: 0, width: '80px', textAlign: 'right',
+                  marginTop: '2px',
+                  color: '#64748b', fontSize: '12px', fontWeight: 600,
+                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                }}>
+                  {block.speaker ?? ''}
                 </span>
-              ))}
-            </p>
-          </div>
-        ))}
+                <div style={{ flex: 1 }}>
+                  {/* Paragraph: all lines joined with a space */}
+                  <p style={{ margin: 0, color: '#cbd5e1', fontSize: '14px', lineHeight: '1.8' }}>
+                    {block.lines.map((line, li) => {
+                      const tokens = blockAnnotated?.[li]
+                      return (
+                        <span key={line.id}>
+                          {li > 0 && ' '}
+                          {tokens
+                            ? <AnnotatedLineText tokens={tokens} />
+                            : <ClickableText text={line.text} />
+                          }
+                        </span>
+                      )
+                    })}
+                  </p>
+                  {/* Translation result */}
+                  {translations[bi] && (
+                    <p style={{ margin: '4px 0 0', color: '#64748b', fontSize: '13px', lineHeight: '1.6' }}>
+                      {translations[bi]}
+                    </p>
+                  )}
+                  {/* Translate button */}
+                  <button
+                    onClick={() => {
+                      setTranslating(prev => ({ ...prev, [bi]: true }))
+                      const text = block.lines.map(l => l.text).join(' ')
+                      api.translate(text).then(r => {
+                        if (r.translation) setTranslations(prev => ({ ...prev, [bi]: r.translation! }))
+                        setTranslating(prev => ({ ...prev, [bi]: false }))
+                      }).catch(() => setTranslating(prev => ({ ...prev, [bi]: false })))
+                    }}
+                    disabled={translating[bi]}
+                    style={{
+                      marginTop: '4px',
+                      background: 'none',
+                      border: 'none',
+                      color: translating[bi] ? '#475569' : '#334155',
+                      cursor: translating[bi] ? 'default' : 'pointer',
+                      fontSize: '11px',
+                      padding: '0',
+                    }}
+                  >
+                    {translating[bi] ? '翻译中…' : translations[bi] ? '重新翻译' : '翻译'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )
+        })}
       </div>
       {selectedWord && <WordPopup word={selectedWord} onClose={() => setSelectedWord(null)} />}
     </>

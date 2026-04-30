@@ -17,6 +17,7 @@ use tower_http::services::{ServeDir, ServeFile};
 
 use crate::db::AppDb;
 use crate::dictionary::EcdictDictionary;
+use crate::translation::LoadedModel;
 
 pub const HTTP_PORT: u16 = 52341;
 
@@ -25,12 +26,16 @@ struct AppState {
     ws_task: Arc<Mutex<Option<tauri::async_runtime::JoinHandle<()>>>>,
     db: AppDb,
     dict: Arc<EcdictDictionary>,
+    translation: Arc<Mutex<Option<LoadedModel>>>,
+    hymt_path: PathBuf,
 }
 
 pub async fn run(
     ws_task: Arc<Mutex<Option<tauri::async_runtime::JoinHandle<()>>>>,
     db: AppDb,
     dict: Arc<EcdictDictionary>,
+    translation: Arc<Mutex<Option<LoadedModel>>>,
+    hymt_path: PathBuf,
     static_dir: Option<PathBuf>,
 ) {
     let listener = match TcpListener::bind(format!("127.0.0.1:{HTTP_PORT}")).await {
@@ -41,7 +46,7 @@ pub async fn run(
         }
     };
 
-    let state = AppState { ws_task, db, dict };
+    let state = AppState { ws_task, db, dict, translation, hymt_path };
 
     let api_router = Router::new()
         .route("/status", get(status_handler))
@@ -58,6 +63,9 @@ pub async fn run(
         .route("/vocab/:id/sentences", get(get_vocab_sentences_handler))
         .route("/word/:word", get(query_word_handler))
         .route("/tts", post(tts_handler))
+        .route("/settings/:key", get(get_setting_handler))
+        .route("/annotate", post(annotate_handler))
+        .route("/translate", post(translate_handler))
         .with_state(state);
 
     let mut app = Router::new()
@@ -427,5 +435,144 @@ async fn tts_handler(Json(body): Json<TtsBody>) -> impl IntoResponse {
     match std::process::Command::new("say").arg(&body.text).spawn() {
         Ok(_) => (StatusCode::OK, Json(json!({ "ok": true }))),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))),
+    }
+}
+
+// ── Settings ──────────────────────────────────────────────────────────────────
+
+async fn get_setting_handler(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+) -> ApiResult<Value> {
+    block_in_place(|| {
+        let conn = state.db.lock().map_err(|e| db_err(e))?;
+        let value: Option<String> = conn.query_row(
+            "SELECT value FROM settings WHERE key = ?1",
+            rusqlite::params![key],
+            |row| row.get(0),
+        ).ok();
+        Ok(Json(json!({ "value": value })))
+    })
+}
+
+// ── Annotate ──────────────────────────────────────────────────────────────────
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AnnotatedToken {
+    text: String,
+    is_word: bool,
+    in_vocab: bool,
+    difficult: bool,
+    definition: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct AnnotateBody {
+    texts: Vec<String>,
+}
+
+fn tokenize_text(text: &str) -> Vec<(String, bool)> {
+    let mut result = Vec::new();
+    let mut current = String::new();
+    let mut in_word = false;
+    for ch in text.chars() {
+        let is_wc = ch.is_ascii_alphabetic() || ch == '\'';
+        if is_wc != in_word {
+            if !current.is_empty() {
+                result.push((std::mem::take(&mut current), in_word));
+            }
+            in_word = is_wc;
+        }
+        current.push(ch);
+    }
+    if !current.is_empty() {
+        result.push((current, in_word));
+    }
+    result
+}
+
+async fn annotate_handler(
+    State(state): State<AppState>,
+    Json(body): Json<AnnotateBody>,
+) -> ApiResult<Vec<Vec<AnnotatedToken>>> {
+    block_in_place(|| {
+        // Read freq threshold from settings (default 3000)
+        let freq_threshold: u32 = {
+            let conn = state.db.lock().map_err(|e| db_err(e))?;
+            let val: Option<String> = conn.query_row(
+                "SELECT value FROM settings WHERE key = ?1",
+                rusqlite::params!["ai_translate_frq_threshold"],
+                |row| row.get(0),
+            ).ok();
+            val.and_then(|s| s.parse().ok()).unwrap_or(3000)
+        };
+
+        // Load all vocab entries into a HashMap<lowercase_entry, (id, definition)>
+        let vocab_map: std::collections::HashMap<String, (i64, Option<String>)> = {
+            let conn = state.db.lock().map_err(|e| db_err(e))?;
+            let mut stmt = conn.prepare(
+                "SELECT entry, id, definition FROM vocabulary",
+            ).map_err(|e| db_err(e))?;
+            let rows = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            }).map_err(|e| db_err(e))?
+            .filter_map(|r| r.ok())
+            .map(|(entry, id, def)| (entry.to_lowercase(), (id, def)))
+            .collect();
+            rows
+        };
+
+        let result: Vec<Vec<AnnotatedToken>> = body.texts.iter().map(|text| {
+            tokenize_text(text).into_iter().map(|(token, is_word)| {
+                if is_word {
+                    let lower = token.to_lowercase();
+                    let (in_vocab, definition) = if let Some((_id, def)) = vocab_map.get(&lower) {
+                        (true, def.clone())
+                    } else {
+                        (false, None)
+                    };
+                    let difficult = state.dict.frequency(&lower)
+                        .map(|f| f > freq_threshold)
+                        .unwrap_or(false);
+                    AnnotatedToken { text: token, is_word: true, in_vocab, difficult, definition }
+                } else {
+                    AnnotatedToken { text: token, is_word: false, in_vocab: false, difficult: false, definition: None }
+                }
+            }).collect()
+        }).collect();
+
+        Ok(Json(result))
+    })
+}
+
+// ── Translate ─────────────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct TranslateBody {
+    text: String,
+}
+
+async fn translate_handler(
+    State(state): State<AppState>,
+    Json(body): Json<TranslateBody>,
+) -> impl IntoResponse {
+    if !state.hymt_path.exists() {
+        return (StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({ "error": "MODEL_NOT_DOWNLOADED" }))).into_response();
+    }
+    let result = block_in_place(|| {
+        crate::translation::ensure_loaded(&state.translation, &state.hymt_path)?;
+        let guard = state.translation.lock().unwrap();
+        let loaded = guard.as_ref().unwrap();
+        crate::translation::translate_sync(loaded, &body.text, None)
+    });
+    match result {
+        Ok(t) => (StatusCode::OK, Json(json!({ "translation": t }))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e }))).into_response(),
     }
 }

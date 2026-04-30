@@ -40,6 +40,9 @@ pub fn run() {
         Arc::new(Mutex::new(None));
     let ws_task_for_http = Arc::clone(&ws_task);
 
+    let translation_loaded: Arc<Mutex<Option<translation::LoadedModel>>> = Arc::new(Mutex::new(None));
+    let translation_for_http = Arc::clone(&translation_loaded);
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_sql::Builder::default().build())
@@ -88,10 +91,13 @@ pub fn run() {
             if static_dir.is_none() {
                 eprintln!("[LearnCaption] web/dist not found — serving API only (run `cd web && npm run build` to enable the dashboard)");
             }
+            let hymt_path = translation::hymt_model_path(app.handle());
             tauri::async_runtime::spawn(http_server::run(
                 ws_task_for_http,
                 db.clone(),
                 dict.clone(),
+                translation_for_http,
+                hymt_path,
                 static_dir,
             ));
 
@@ -107,7 +113,7 @@ pub fn run() {
             annotator: Arc::new(Mutex::new(None)),
         })
         .manage(TranslationState {
-            loaded: Arc::new(Mutex::new(None)),
+            loaded: translation_loaded,
         })
         .invoke_handler(tauri::generate_handler![
             commands::pipeline::check_model,
