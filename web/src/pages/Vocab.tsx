@@ -54,9 +54,10 @@ function EntryRow({ entry, onMastered }: EntryRowProps) {
           borderBottom: '1px solid #1e293b',
         }}
       >
-        <td style={{ padding: '10px 16px', color: '#e2e8f0', fontWeight: 500 }}>
-          {entry.entry}
-          {isMastered && <span style={{ marginLeft: '6px', color: '#10b981', fontSize: '11px' }}>✓ mastered</span>}
+        <td style={{ padding: '10px 16px', color: isMastered ? '#475569' : '#e2e8f0', fontWeight: 500 }}>
+          <span style={{ textDecoration: isMastered ? 'line-through' : 'none' }}>
+            {entry.entry}
+          </span>
         </td>
         <td style={{ padding: '10px 16px', color: '#94a3b8', fontSize: '13px', maxWidth: '300px' }}>
           {entry.definition ?? '—'}
@@ -70,10 +71,32 @@ function EntryRow({ entry, onMastered }: EntryRowProps) {
         <td style={{ padding: '10px 16px', color: '#64748b', fontSize: '12px' }}>
           {new Date(entry.addedAt).toLocaleDateString()}
         </td>
+        {/* Mastered toggle — directly in row, no expand needed */}
+        <td
+          style={{ padding: '10px 12px', textAlign: 'center', width: '40px' }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            title={isMastered ? 'Mastered' : 'Mark as mastered'}
+            onClick={() => { if (!isMastered) onMastered(entry.id) }}
+            style={{
+              width: '28px', height: '28px', borderRadius: '50%', border: 'none',
+              cursor: isMastered ? 'default' : 'pointer',
+              background: isMastered ? '#10b981' : '#1e293b',
+              color: isMastered ? '#fff' : '#475569',
+              fontSize: '14px', display: 'flex', alignItems: 'center',
+              justifyContent: 'center', transition: 'all 0.15s',
+            }}
+            onMouseEnter={(e) => { if (!isMastered) (e.currentTarget.style.background = '#334155') }}
+            onMouseLeave={(e) => { if (!isMastered) (e.currentTarget.style.background = '#1e293b') }}
+          >
+            ✓
+          </button>
+        </td>
       </tr>
       {expanded && (
         <tr style={{ background: '#0f172a' }}>
-          <td colSpan={5} style={{ padding: '12px 16px 16px 32px' }}>
+          <td colSpan={6} style={{ padding: '12px 16px 16px 32px' }}>
             <div style={{ display: 'flex', gap: '12px', marginBottom: '12px' }}>
               <button
                 style={{
@@ -84,17 +107,6 @@ function EntryRow({ entry, onMastered }: EntryRowProps) {
               >
                 🔊 Pronounce
               </button>
-              {!isMastered && (
-                <button
-                  style={{
-                    padding: '5px 14px', borderRadius: '6px', border: 'none',
-                    background: '#10b981', color: '#fff', cursor: 'pointer', fontSize: '13px',
-                  }}
-                  onClick={(e) => { e.stopPropagation(); onMastered(entry.id) }}
-                >
-                  Mark as mastered
-                </button>
-              )}
             </div>
             {loadingSentences ? (
               <p style={{ color: '#64748b', fontSize: '13px', margin: 0 }}>Loading sentences…</p>
@@ -228,12 +240,13 @@ export default function Vocab() {
             <th style={thStyle('addedAt')} onClick={() => toggleSort('addedAt')}>
               Added {sortKey === 'addedAt' ? (sortAsc ? '↑' : '↓') : ''}
             </th>
+            <th style={{ ...thStyle('entry'), cursor: 'default', width: '40px' }} />
           </tr>
         </thead>
         <tbody>
           {sortedFiltered.length === 0 ? (
             <tr>
-              <td colSpan={5} style={{ padding: '40px', textAlign: 'center', color: '#475569' }}>
+              <td colSpan={6} style={{ padding: '40px', textAlign: 'center', color: '#475569' }}>
                 No entries found.
               </td>
             </tr>
