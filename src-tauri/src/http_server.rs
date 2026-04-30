@@ -99,6 +99,7 @@ struct MeetingDto {
     title: String,
     started_at: String,
     ended_at: Option<String>,
+    source: String,
 }
 
 #[derive(Deserialize)]
@@ -129,13 +130,14 @@ async fn list_meetings_handler(State(state): State<AppState>) -> ApiResult<Vec<M
     block_in_place(|| {
         let conn = state.db.lock().map_err(|e| db_err(e))?;
         let mut stmt = conn.prepare(
-            "SELECT id, title, started_at, ended_at FROM meetings ORDER BY started_at DESC",
+            "SELECT id, title, started_at, ended_at, source FROM meetings ORDER BY started_at DESC",
         ).map_err(|e| db_err(e))?;
         let rows = stmt.query_map([], |row| Ok(MeetingDto {
             id: row.get(0)?,
             title: row.get(1)?,
             started_at: row.get(2)?,
             ended_at: row.get(3)?,
+            source: row.get(4)?,
         })).map_err(|e| db_err(e))?
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(|e| db_err(e))?;

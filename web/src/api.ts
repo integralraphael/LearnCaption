@@ -5,6 +5,7 @@ export interface Meeting {
   title: string;
   startedAt: string;
   endedAt: string | null;
+  source: string;
 }
 
 export interface TranscriptLine {

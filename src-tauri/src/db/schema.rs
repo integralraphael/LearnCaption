@@ -53,7 +53,15 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
             ON vocab_sentences(vocab_id);
         CREATE INDEX IF NOT EXISTS idx_transcript_lines_meeting_id
             ON transcript_lines(meeting_id);
-    ")
+    ")?;
+
+    // Additive migrations — safe to re-run (errors from duplicate column are ignored)
+    let _ = conn.execute(
+        "ALTER TABLE meetings ADD COLUMN source TEXT NOT NULL DEFAULT 'whisper'",
+        [],
+    );
+
+    Ok(())
 }
 
 pub fn open(path: &str) -> Result<Connection> {

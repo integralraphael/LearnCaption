@@ -1,6 +1,26 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, Meeting, TranscriptLine, WordResult } from '../api'
 
+function SourceBadge({ source }: { source: string }) {
+  const isGoogle = source === 'browser'
+  return (
+    <span style={{
+      display: 'inline-block',
+      padding: '1px 7px',
+      borderRadius: '4px',
+      fontSize: '11px',
+      fontWeight: 600,
+      background: isGoogle ? 'rgba(59,130,246,0.15)' : 'rgba(139,92,246,0.15)',
+      color: isGoogle ? '#60a5fa' : '#a78bfa',
+      border: `1px solid ${isGoogle ? 'rgba(59,130,246,0.3)' : 'rgba(139,92,246,0.3)'}`,
+      letterSpacing: '0.2px',
+      flexShrink: 0,
+    }}>
+      {isGoogle ? 'Google Meet' : 'Whisper'}
+    </span>
+  )
+}
+
 function formatDate(s: string) {
   return new Date(s).toLocaleString()
 }
@@ -158,10 +178,11 @@ function ClickableText({ text }: { text: string }) {
 }
 
 interface TranscriptViewProps {
-  meetingId: number
+  meeting: Meeting
 }
 
-function TranscriptView({ meetingId }: TranscriptViewProps) {
+function TranscriptView({ meeting }: TranscriptViewProps) {
+  const meetingId = meeting.id
   const [lines, setLines] = useState<TranscriptLine[]>([])
   const [selectedWord, setSelectedWord] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -179,14 +200,30 @@ function TranscriptView({ meetingId }: TranscriptViewProps) {
     }
   }
 
-  if (loading) return <p style={{ color: '#64748b', padding: '20px' }}>Loading transcript…</p>
-  if (lines.length === 0) return <p style={{ color: '#64748b', padding: '20px' }}>No transcript lines.</p>
-
-  const blocks = groupBySpeaker(lines)
+  const blocks = loading ? [] : groupBySpeaker(lines)
 
   return (
     <>
-      <div style={{ overflowY: 'auto', height: '100%', padding: '16px' }} onClick={handleWordClick}>
+      {/* Meeting header */}
+      <div style={{
+        padding: '14px 20px 12px',
+        borderBottom: '1px solid #1e293b',
+        flexShrink: 0,
+        display: 'flex',
+        alignItems: 'center',
+        gap: '10px',
+      }}>
+        <h2 style={{ margin: 0, fontSize: '16px', fontWeight: 600, color: '#f1f5f9', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {meeting.title}
+        </h2>
+        <SourceBadge source={meeting.source} />
+        <span style={{ color: '#475569', fontSize: '12px', flexShrink: 0 }}>
+          {new Date(meeting.startedAt).toLocaleString()}
+        </span>
+      </div>
+      <div style={{ overflowY: 'auto', flex: 1, padding: '16px' }} onClick={handleWordClick}>
+        {loading && <p style={{ color: '#64748b', margin: 0 }}>Loading transcript…</p>}
+        {!loading && lines.length === 0 && <p style={{ color: '#64748b', margin: 0 }}>No transcript lines.</p>}
         {blocks.map((block, bi) => (
           <div key={bi} style={{ marginBottom: '16px', display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
             {/* Speaker badge — fixed width column so text aligns */}
@@ -216,6 +253,7 @@ function TranscriptView({ meetingId }: TranscriptViewProps) {
       {selectedWord && <WordPopup word={selectedWord} onClose={() => setSelectedWord(null)} />}
     </>
   )
+}
 }
 
 function MeetingItem({
@@ -287,6 +325,9 @@ function MeetingItem({
           >✎</button>
         </div>
       )}
+      <div style={{ marginBottom: '4px' }}>
+        <SourceBadge source={meeting.source} />
+      </div>
       <div style={{ fontSize: '12px', color: '#64748b' }}>{formatDate(meeting.startedAt)}</div>
       <div style={{ fontSize: '12px', color: '#475569' }}>{duration(meeting)}</div>
     </div>
@@ -333,9 +374,9 @@ export default function Meetings() {
       </div>
 
       {/* Right panel: transcript */}
-      <div style={{ flex: 1, overflow: 'hidden' }}>
+      <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
         {selected ? (
-          <TranscriptView meetingId={selected} />
+          <TranscriptView meeting={meetings.find(m => m.id === selected)!} />
         ) : (
           <p style={{ color: '#475569', padding: '20px' }}>Select a meeting to view its transcript.</p>
         )}

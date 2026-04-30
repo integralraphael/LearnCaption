@@ -58,7 +58,7 @@ pub async fn start_recording(
     let meeting_id: i64 = {
         let conn = db.lock().map_err(|e| e.to_string())?;
         conn.execute(
-            "INSERT INTO meetings (title, started_at) VALUES ('Meeting', datetime('now'))",
+            "INSERT INTO meetings (title, started_at, source) VALUES ('Meeting', datetime('now'), 'whisper')",
             [],
         ).map_err(|e| e.to_string())?;
         conn.last_insert_rowid()
