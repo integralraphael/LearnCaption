@@ -1,5 +1,5 @@
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWindow, PhysicalPosition } from "@tauri-apps/api/window";
 
 interface PopoverOptions {
   word: string;
@@ -23,33 +23,41 @@ export async function openWordPopover(opts: PopoverOptions) {
     mainWin.scaleFactor(),
   ]);
 
-  // Absolute screen position of the click (logical pixels)
-  const clickX = mainPos.x / scaleFactor + opts.anchorX;
-  const clickY = mainPos.y / scaleFactor + opts.anchorY;
-
   const popoverWidth = 300;
   const popoverHeight = 280;
 
-  // Center horizontally on the click; appear below the word, or above if in
-  // the bottom portion of the window.
-  const x = Math.round(clickX - popoverWidth / 2);
-  const y = opts.anchorY > window.innerHeight * 0.55
-    ? Math.round(clickY - popoverHeight - 8)
-    : Math.round(clickY + 8);
+  // Work entirely in physical pixels so multi-monitor / mixed-DPI setups are correct.
+  // outerPosition() is already physical; anchorX/Y are logical CSS pixels → multiply by sf.
+  const clickPhysX = mainPos.x + Math.round(opts.anchorX * scaleFactor);
+  const clickPhysY = mainPos.y + Math.round(opts.anchorY * scaleFactor);
+  const physW = Math.round(popoverWidth * scaleFactor);
+  const physH = Math.round(popoverHeight * scaleFactor);
+
+  const physX = clickPhysX - Math.round(physW / 2);
+  const physY = opts.anchorY > window.innerHeight * 0.55
+    ? clickPhysY - physH - Math.round(8 * scaleFactor)
+    : clickPhysY + Math.round(8 * scaleFactor);
 
   const base = window.location.origin;
+  // Start hidden so we can set position before the window appears (no flash).
   popoverWindow = new WebviewWindow("word-detail", {
     url: `${base}?popover=true&word=${encodeURIComponent(opts.word)}&context=${encodeURIComponent(opts.context)}&isPhrase=${opts.isPhrase}`,
     width: popoverWidth,
     height: popoverHeight,
-    x: Math.max(0, x),
-    y: Math.max(0, y),
+    visible: false,
     decorations: false,
     transparent: true,
     alwaysOnTop: true,
-    focus: true,
+    focus: false,
     resizable: false,
     skipTaskbar: true,
+  });
+
+  popoverWindow.once("tauri://created", async () => {
+    if (!popoverWindow) return;
+    await popoverWindow.setPosition(new PhysicalPosition(physX, physY));
+    await popoverWindow.show();
+    await popoverWindow.setFocus();
   });
 
   // Close when the popover window loses focus (clicking another app)

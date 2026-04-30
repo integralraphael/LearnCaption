@@ -8,6 +8,9 @@
     "core:window:allow-start-dragging",
     "core:window:allow-create",
     "core:window:allow-close",
+    "core:window:allow-set-position",
+    "core:window:allow-show",
+    "core:window:allow-set-focus",
     "core:webview:allow-create-webview",
     "core:webview:allow-create-webview-window",
     "opener:default"
