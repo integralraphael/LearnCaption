@@ -60,6 +60,10 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
         "ALTER TABLE meetings ADD COLUMN source TEXT NOT NULL DEFAULT 'whisper'",
         [],
     );
+    let _ = conn.execute(
+        "ALTER TABLE transcript_lines ADD COLUMN translation TEXT",
+        [],
+    );
 
     Ok(())
 }

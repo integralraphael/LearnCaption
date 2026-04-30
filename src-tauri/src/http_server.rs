@@ -160,6 +160,7 @@ struct TranscriptLineDto {
     text: String,
     timestamp_ms: i64,
     speaker_label: Option<String>,
+    translation: Option<String>,
 }
 
 async fn get_transcript_handler(
@@ -169,7 +170,7 @@ async fn get_transcript_handler(
     block_in_place(|| {
         let conn = state.db.lock().map_err(|e| db_err(e))?;
         let mut stmt = conn.prepare(
-            "SELECT id, text, timestamp_ms, speaker_label
+            "SELECT id, text, timestamp_ms, speaker_label, translation
              FROM transcript_lines WHERE meeting_id = ?1 ORDER BY timestamp_ms",
         ).map_err(|e| db_err(e))?;
         let rows = stmt.query_map(rusqlite::params![id], |row| Ok(TranscriptLineDto {
@@ -177,6 +178,7 @@ async fn get_transcript_handler(
             text: row.get(1)?,
             timestamp_ms: row.get(2)?,
             speaker_label: row.get(3)?,
+            translation: row.get(4)?,
         })).map_err(|e| db_err(e))?
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(|e| db_err(e))?;
@@ -555,6 +557,9 @@ async fn annotate_handler(
 #[derive(Deserialize)]
 struct TranslateBody {
     text: String,
+    /// Line IDs whose translation column should be updated after a successful translation.
+    #[serde(default)]
+    line_ids: Vec<i64>,
 }
 
 async fn translate_handler(
@@ -565,11 +570,25 @@ async fn translate_handler(
         return (StatusCode::SERVICE_UNAVAILABLE,
                 Json(json!({ "error": "MODEL_NOT_DOWNLOADED" }))).into_response();
     }
+    let db = state.db.clone();
+    let line_ids = body.line_ids.clone();
     let result = block_in_place(|| {
         crate::translation::ensure_loaded(&state.translation, &state.hymt_path)?;
         let guard = state.translation.lock().unwrap();
         let loaded = guard.as_ref().unwrap();
-        crate::translation::translate_sync(loaded, &body.text, None)
+        let translation = crate::translation::translate_sync(loaded, &body.text, None)?;
+        // Persist to DB for all lines in this block
+        if !line_ids.is_empty() {
+            if let Ok(conn) = db.lock() {
+                for id in &line_ids {
+                    let _ = conn.execute(
+                        "UPDATE transcript_lines SET translation = ?1 WHERE id = ?2",
+                        rusqlite::params![translation, id],
+                    );
+                }
+            }
+        }
+        Ok(translation)
     });
     match result {
         Ok(t) => (StatusCode::OK, Json(json!({ "translation": t }))).into_response(),

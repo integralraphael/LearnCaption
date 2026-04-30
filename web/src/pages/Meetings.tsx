@@ -234,7 +234,19 @@ function TranscriptView({ meeting }: TranscriptViewProps) {
     setAnnotated(null)
     setTranslations({})
     setTranslating({})
-    api.transcript(meetingId).then((data) => { setLines(data); setLoading(false) })
+    api.transcript(meetingId).then((data) => {
+      setLines(data)
+      setLoading(false)
+      // Seed translations from cached DB values — group by speaker blocks,
+      // use first non-null translation found in each block.
+      const cached: Record<number, string> = {}
+      const blocks = groupBySpeaker(data)
+      blocks.forEach((block, bi) => {
+        const t = block.lines.find(l => l.translation)?.translation
+        if (t) cached[bi] = t
+      })
+      if (Object.keys(cached).length > 0) setTranslations(cached)
+    })
   }, [meetingId])
 
   useEffect(() => {
@@ -322,7 +334,8 @@ function TranscriptView({ meeting }: TranscriptViewProps) {
                     onClick={() => {
                       setTranslating(prev => ({ ...prev, [bi]: true }))
                       const text = block.lines.map(l => l.text).join(' ')
-                      api.translate(text).then(r => {
+                      const lineIds = block.lines.map(l => l.id)
+                      api.translate(text, lineIds).then(r => {
                         if (r.translation) setTranslations(prev => ({ ...prev, [bi]: r.translation! }))
                         setTranslating(prev => ({ ...prev, [bi]: false }))
                       }).catch(() => setTranslating(prev => ({ ...prev, [bi]: false })))

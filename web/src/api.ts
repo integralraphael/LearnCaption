@@ -13,6 +13,7 @@ export interface TranscriptLine {
   text: string;
   timestampMs: number;
   speakerLabel: string | null;
+  translation: string | null;
 }
 
 export interface VocabEntry {
@@ -81,5 +82,5 @@ export const api = {
   tts: (text: string) => post<{ ok: boolean }>('/tts', { text }),
   setting: (key: string) => get<{ value: string | null }>(`/settings/${key}`),
   annotate: (texts: string[]) => post<AnnotatedToken[][]>('/annotate', { texts }),
-  translate: (text: string) => post<{ translation?: string; error?: string }>('/translate', { text }),
+  translate: (text: string, lineIds: number[]) => post<{ translation?: string; error?: string }>('/translate', { text, lineIds }),
 };
