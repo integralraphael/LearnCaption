@@ -256,9 +256,11 @@ function TranscriptView({ meeting, onConfigChange }: TranscriptViewProps) {
   const [selectedWord, setSelectedWord] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [annotated, setAnnotated] = useState<AnnotatedToken[][] | null>(null)
+  // translations keyed by line.id
   const [translations, setTranslations] = useState<Record<number, string>>({})
   const [translating, setTranslating] = useState<Record<number, boolean>>({})
-  const [freqThreshold, setFreqThreshold] = useState(3000)
+  // track which line IDs we've already queued in this session to avoid duplicates
+  const translatedInSession = useRef(new Set<number>())
 
   const updateConfig = (patch: Partial<MeetingViewConfig>) => {
     const next = { ...config, ...patch }
@@ -268,26 +270,21 @@ function TranscriptView({ meeting, onConfigChange }: TranscriptViewProps) {
   }
 
   useEffect(() => {
-    api.setting('ai_translate_frq_threshold')
-      .then(r => setFreqThreshold(parseInt(r.value ?? '3000', 10)))
-      .catch(() => {})
-  }, [])
-
-  useEffect(() => {
     setLoading(true)
     setAnnotated(null)
     setTranslations({})
     setTranslating({})
+    translatedInSession.current = new Set()
     api.transcript(meetingId).then((data) => {
       setLines(data)
       setLoading(false)
-      // Seed translations from cached DB values — group by speaker blocks,
-      // use first non-null translation found in each block.
-      const blocks = groupBySpeaker(data)
+      // Seed translations from DB cache — keyed by line.id
       const cached: Record<number, string> = {}
-      blocks.forEach((block, bi) => {
-        const t = block.lines.find(l => l.translation)?.translation
-        if (t) cached[bi] = t
+      data.forEach(line => {
+        if (line.translation) {
+          cached[line.id] = line.translation
+          translatedInSession.current.add(line.id)
+        }
       })
       if (Object.keys(cached).length > 0) setTranslations(cached)
     })
@@ -301,37 +298,50 @@ function TranscriptView({ meeting, onConfigChange }: TranscriptViewProps) {
     }).catch(() => {})
   }, [lines])
 
+  // Combined auto-translate effect:
+  // - translationMode === 'all' → translate every line
+  // - showVocab || showDifficult → translate lines containing those highlighted words
   useEffect(() => {
-    if (config.translationMode !== 'all' || lines.length === 0) return
+    if (lines.length === 0) return
+    const wantAll = config.translationMode === 'all'
+    const wantVocab = config.showVocab || config.showDifficult
+
+    if (!wantAll && (!wantVocab || !annotated)) return
+
     let cancelled = false
 
-    const blocks = groupBySpeaker(lines)
-    // Only blocks without a cached DB translation need to be translated
-    const todo = blocks
-      .map((block, bi) => ({ block, bi }))
-      .filter(({ block }) => !block.lines.some(l => l.translation))
+    const todo = lines.filter((line, i) => {
+      // Skip if already queued/done this session
+      if (translatedInSession.current.has(line.id)) return false
+      if (wantAll) return true
+      // Vocab/difficult: only lines that contain a matching token
+      const tokens = annotated?.[i]
+      return tokens?.some(t =>
+        (config.showVocab && t.inVocab) || (config.showDifficult && t.difficult)
+      ) ?? false
+    })
 
     if (todo.length === 0) return
 
-    // Translate sequentially — one block at a time so the model isn't swamped.
-    // Each result appears immediately as it finishes.
+    // Mark all as queued immediately to prevent double-queuing
+    todo.forEach(line => translatedInSession.current.add(line.id))
+
+    // Translate one sentence at a time — result appears as each finishes
     ;(async () => {
-      for (const { block, bi } of todo) {
+      for (const line of todo) {
         if (cancelled) break
-        setTranslating(prev => ({ ...prev, [bi]: true }))
+        setTranslating(prev => ({ ...prev, [line.id]: true }))
         try {
-          const text = block.lines.map(l => l.text).join(' ')
-          const lineIds = block.lines.map(l => l.id)
-          const r = await api.translate(text, lineIds)
+          const r = await api.translate(line.text, [line.id])
           if (!cancelled && r.translation)
-            setTranslations(prev => ({ ...prev, [bi]: r.translation! }))
+            setTranslations(prev => ({ ...prev, [line.id]: r.translation! }))
         } catch {}
-        if (!cancelled) setTranslating(prev => ({ ...prev, [bi]: false }))
+        if (!cancelled) setTranslating(prev => ({ ...prev, [line.id]: false }))
       }
     })()
 
     return () => { cancelled = true }
-  }, [config.translationMode, lines])
+  }, [config.translationMode, config.showVocab, config.showDifficult, lines, annotated])
 
   const handleWordClick = (e: React.MouseEvent<HTMLDivElement>) => {
     const target = e.target as HTMLElement
@@ -417,77 +427,67 @@ function TranscriptView({ meeting, onConfigChange }: TranscriptViewProps) {
       <div style={{ overflowY: 'auto', flex: 1, padding: '16px' }} onClick={handleWordClick}>
         {loading && <p style={{ color: '#64748b', margin: 0 }}>Loading transcript…</p>}
         {!loading && lines.length === 0 && <p style={{ color: '#64748b', margin: 0 }}>No transcript lines.</p>}
-        {blocks.map((block, bi) => {
-          const blockAnnotated = annotated ? block.lines.map((line) => {
-            const idx = lines.findIndex(l => l.id === line.id)
-            return idx >= 0 && annotated[idx] ? annotated[idx] : null
-          }) : null
+        {blocks.map((block, bi) => (
+          <div key={bi} style={{ marginBottom: '14px' }}>
+            {block.lines.map((line, li) => {
+              const idx = lines.findIndex(l => l.id === line.id)
+              const tokens = annotated && idx >= 0 ? annotated[idx] : null
+              const lineTranslation = translations[line.id]
+              const lineTranslating = translating[line.id]
 
-          return (
-            <div key={bi} style={{ marginBottom: '16px' }}>
-              <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
-                {/* Speaker badge — fixed width column so text aligns */}
-                <span style={{
-                  flexShrink: 0, width: '80px', textAlign: 'right',
-                  marginTop: '2px',
-                  color: '#64748b', fontSize: '12px', fontWeight: 600,
-                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                }}>
-                  {block.speaker ?? ''}
-                </span>
-                <div style={{ flex: 1 }}>
-                  {/* Paragraph: all lines joined with a space */}
-                  <p style={{ margin: 0, color: '#cbd5e1', fontSize: '14px', lineHeight: '1.8' }}>
-                    {block.lines.map((line, li) => {
-                      const tokens = blockAnnotated?.[li]
-                      return (
-                        <span key={line.id}>
-                          {li > 0 && ' '}
-                          {tokens
-                            ? <AnnotatedLineText tokens={tokens} config={config} />
-                            : <ClickableText text={line.text} />
-                          }
-                        </span>
-                      )
-                    })}
-                  </p>
-                  {/* Translation result */}
-                  {config.translationMode !== 'none' && translations[bi] && (
-                    <p style={{ margin: '4px 0 0', color: '#64748b', fontSize: '13px', lineHeight: '1.6' }}>
-                      {translations[bi]}
+              return (
+                <div key={line.id} style={{ display: 'flex', gap: '10px', alignItems: 'flex-start', marginBottom: '6px' }}>
+                  {/* Speaker badge — shown only on first line of block */}
+                  <span style={{
+                    flexShrink: 0, width: '80px', textAlign: 'right',
+                    marginTop: '2px',
+                    color: '#64748b', fontSize: '12px', fontWeight: 600,
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                  }}>
+                    {li === 0 ? (block.speaker ?? '') : ''}
+                  </span>
+                  <div style={{ flex: 1 }}>
+                    <p style={{ margin: 0, color: '#cbd5e1', fontSize: '14px', lineHeight: '1.8' }}>
+                      {tokens
+                        ? <AnnotatedLineText tokens={tokens} config={config} />
+                        : <ClickableText text={line.text} />
+                      }
                     </p>
-                  )}
-                  {/* Translate button */}
-                  {config.translationMode !== 'none' && (
-                    <button
-                      onClick={() => {
-                        setTranslating(prev => ({ ...prev, [bi]: true }))
-                        const text = block.lines.map(l => l.text).join(' ')
-                        const lineIds = block.lines.map(l => l.id)
-                        api.translate(text, lineIds).then(r => {
-                          if (r.translation) setTranslations(prev => ({ ...prev, [bi]: r.translation! }))
-                          setTranslating(prev => ({ ...prev, [bi]: false }))
-                        }).catch(() => setTranslating(prev => ({ ...prev, [bi]: false })))
-                      }}
-                      disabled={translating[bi]}
-                      style={{
-                        marginTop: '4px',
-                        background: 'none',
-                        border: 'none',
-                        color: translating[bi] ? '#475569' : '#334155',
-                        cursor: translating[bi] ? 'default' : 'pointer',
-                        fontSize: '11px',
-                        padding: '0',
-                      }}
-                    >
-                      {translating[bi] ? '翻译中…' : translations[bi] ? '重新翻译' : '翻译'}
-                    </button>
-                  )}
+                    {/* Translation result */}
+                    {config.translationMode !== 'none' && lineTranslation && (
+                      <p style={{ margin: '2px 0 0', color: '#64748b', fontSize: '13px', lineHeight: '1.6' }}>
+                        {lineTranslation}
+                      </p>
+                    )}
+                    {/* Status / manual translate */}
+                    {config.translationMode !== 'none' && (
+                      lineTranslating
+                        ? <span style={{ fontSize: '11px', color: '#475569' }}>翻译中…</span>
+                        : <button
+                            onClick={() => {
+                              translatedInSession.current.add(line.id)
+                              setTranslating(prev => ({ ...prev, [line.id]: true }))
+                              api.translate(line.text, [line.id]).then(r => {
+                                if (r.translation) setTranslations(prev => ({ ...prev, [line.id]: r.translation! }))
+                                setTranslating(prev => ({ ...prev, [line.id]: false }))
+                              }).catch(() => setTranslating(prev => ({ ...prev, [line.id]: false })))
+                            }}
+                            style={{
+                              marginTop: '2px', background: 'none', border: 'none',
+                              color: '#334155', cursor: 'pointer', fontSize: '11px', padding: '0',
+                            }}
+                            onMouseEnter={e => (e.currentTarget.style.color = '#64748b')}
+                            onMouseLeave={e => (e.currentTarget.style.color = '#334155')}
+                          >
+                            {lineTranslation ? '重新翻译' : '翻译'}
+                          </button>
+                    )}
+                  </div>
                 </div>
-              </div>
-            </div>
-          )
-        })}
+              )
+            })}
+          </div>
+        ))}
       </div>
       {selectedWord && <WordPopup word={selectedWord} onClose={() => setSelectedWord(null)} />}
     </>
@@ -590,7 +590,7 @@ export default function Meetings() {
   }
 
   const handleConfigChange = (id: number, config: MeetingViewConfig) => {
-    setMeetings(prev => prev.map(m => m.id === id ? { ...m, config: config as Record<string, unknown> } : m))
+    setMeetings(prev => prev.map(m => m.id === id ? { ...m, config: config as unknown as Record<string, unknown> } : m))
   }
 
   if (loading) return <p style={{ color: '#64748b', padding: '20px' }}>Loading…</p>
