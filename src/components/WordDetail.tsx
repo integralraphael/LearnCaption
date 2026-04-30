@@ -155,7 +155,8 @@ export function WordDetail({ word, context, isPhrase, onClose, onAddToVocab }: P
         border: "1px solid #1e293b",
         borderRadius: "10px",
         padding: "16px",
-        minWidth: "300px",
+        width: "100%",
+        boxSizing: "border-box",
       }}
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
@@ -176,9 +177,9 @@ export function WordDetail({ word, context, isPhrase, onClose, onAddToVocab }: P
       </div>
 
       {/* Translation — best of ECDICT / AI */}
-      <div style={{ marginTop: "8px", background: "#1e293b", borderRadius: "6px", padding: "8px 12px", minHeight: "28px" }}>
+      <div style={{ marginTop: "8px", minHeight: "24px" }}>
         {translation && (
-          <span style={{ color: "#cbd5e1", fontSize: "14px", lineHeight: "1.6" }}>{translation}</span>
+          <span style={{ color: "#cbd5e1", fontSize: "14px", lineHeight: "1.6", wordBreak: "break-word", whiteSpace: "pre-wrap" }}>{translation}</span>
         )}
         {translating && !translation && (
           <span style={{ color: "#64748b", fontSize: "14px" }}>翻译中…</span>
