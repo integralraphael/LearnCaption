@@ -62,6 +62,7 @@ export const api = {
   addVocab: (entry: string, definition: string, entryType = 'word') =>
     post<VocabEntry>('/vocab', { entry, definition, entryType }),
   markMastered: (id: number) => post<{ ok: boolean }>(`/vocab/${id}/master`),
+  unmarkMastered: (id: number) => post<{ ok: boolean }>(`/vocab/${id}/unmaster`),
   vocabSentences: (id: number) => get<VocabSentence[]>(`/vocab/${id}/sentences`),
   word: (word: string) => get<WordResult>(`/word/${encodeURIComponent(word)}`),
   tts: (text: string) => post<{ ok: boolean }>('/tts', { text }),

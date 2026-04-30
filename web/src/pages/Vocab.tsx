@@ -24,9 +24,10 @@ function FamiliarityDots({ level }: { level: number }) {
 interface EntryRowProps {
   entry: VocabEntry
   onMastered: (id: number) => void
+  onUnmastered: (id: number) => void
 }
 
-function EntryRow({ entry, onMastered }: EntryRowProps) {
+function EntryRow({ entry, onMastered, onUnmastered }: EntryRowProps) {
   const [expanded, setExpanded] = useState(false)
   const [sentences, setSentences] = useState<VocabSentence[]>([])
   const [loadingSentences, setLoadingSentences] = useState(false)
@@ -77,18 +78,22 @@ function EntryRow({ entry, onMastered }: EntryRowProps) {
           onClick={(e) => e.stopPropagation()}
         >
           <button
-            title={isMastered ? 'Mastered' : 'Mark as mastered'}
-            onClick={() => { if (!isMastered) onMastered(entry.id) }}
+            title={isMastered ? 'Click to unmark' : 'Mark as mastered'}
+            onClick={() => isMastered ? onUnmastered(entry.id) : onMastered(entry.id)}
             style={{
               width: '28px', height: '28px', borderRadius: '50%', border: 'none',
-              cursor: isMastered ? 'default' : 'pointer',
+              cursor: 'pointer',
               background: isMastered ? '#10b981' : '#1e293b',
               color: isMastered ? '#fff' : '#475569',
               fontSize: '14px', display: 'flex', alignItems: 'center',
               justifyContent: 'center', transition: 'all 0.15s',
             }}
-            onMouseEnter={(e) => { if (!isMastered) (e.currentTarget.style.background = '#334155') }}
-            onMouseLeave={(e) => { if (!isMastered) (e.currentTarget.style.background = '#1e293b') }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = isMastered ? '#059669' : '#334155'
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = isMastered ? '#10b981' : '#1e293b'
+            }}
           >
             ✓
           </button>
@@ -152,6 +157,14 @@ export default function Vocab() {
     api.markMastered(id).then(() => {
       setEntries((prev) =>
         prev.map((e) => e.id === id ? { ...e, familiarity: 5, masteredAt: new Date().toISOString() } : e)
+      )
+    })
+  }
+
+  const handleUnmastered = (id: number) => {
+    api.unmarkMastered(id).then(() => {
+      setEntries((prev) =>
+        prev.map((e) => e.id === id ? { ...e, familiarity: 0, masteredAt: null } : e)
       )
     })
   }
@@ -251,7 +264,7 @@ export default function Vocab() {
               </td>
             </tr>
           ) : sortedFiltered.map((e) => (
-            <EntryRow key={e.id} entry={e} onMastered={handleMastered} />
+            <EntryRow key={e.id} entry={e} onMastered={handleMastered} onUnmastered={handleUnmastered} />
           ))}
         </tbody>
       </table>

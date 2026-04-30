@@ -50,6 +50,7 @@ pub async fn run(
         .route("/vocab", get(list_vocab_handler))
         .route("/vocab", post(add_vocab_handler))
         .route("/vocab/:id/master", post(mark_mastered_handler))
+        .route("/vocab/:id/unmaster", post(mark_unmastered_handler))
         .route("/vocab/:id/sentences", get(get_vocab_sentences_handler))
         .route("/word/:word", get(query_word_handler))
         .route("/tts", post(tts_handler))
@@ -216,6 +217,24 @@ async fn add_vocab_handler(
         ).map_err(|e| db_err(e))?;
         Ok(Json(row))
     })
+}
+
+async fn mark_unmastered_handler(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> impl IntoResponse {
+    let result = block_in_place(|| {
+        let conn = state.db.lock().map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE vocabulary SET familiarity = 0, mastered_at = NULL WHERE id = ?1",
+            rusqlite::params![id],
+        ).map_err(|e| e.to_string())?;
+        Ok::<_, String>(())
+    });
+    match result {
+        Ok(()) => (StatusCode::OK, Json(json!({ "ok": true }))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e }))),
+    }
 }
 
 async fn mark_mastered_handler(
