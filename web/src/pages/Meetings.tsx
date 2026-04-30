@@ -254,7 +254,6 @@ function TranscriptView({ meeting }: TranscriptViewProps) {
     </>
   )
 }
-}
 
 function MeetingItem({
   meeting, selected, onSelect, onRename,
