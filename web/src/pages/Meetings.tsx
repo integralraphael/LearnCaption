@@ -20,72 +20,103 @@ interface WordPopupProps {
 
 function WordPopup({ word, onClose }: WordPopupProps) {
   const [result, setResult] = useState<WordResult | null>(null)
+  const [added, setAdded] = useState(false)
 
   useEffect(() => {
+    setResult(null)
+    setAdded(false)
     api.word(word).then(setResult).catch(() => setResult(null))
   }, [word])
+
+  // Close on Escape key
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [onClose])
+
+  const inVocab = added || !!result?.vocabEntry
 
   return (
     <div
       style={{
-        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50,
+        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+        background: 'rgba(0,0,0,0.6)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        zIndex: 9999,
       }}
-      onClick={onClose}
+      onMouseDown={onClose}
     >
       <div
         style={{
-          background: '#1e293b', border: '1px solid #334155', borderRadius: '10px',
-          padding: '24px', maxWidth: '480px', width: '90%',
+          background: '#1e293b', border: '1px solid #334155', borderRadius: '12px',
+          width: '420px', maxWidth: '92vw',
+          maxHeight: '70vh', display: 'flex', flexDirection: 'column',
+          boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
         }}
-        onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
       >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-          <h3 style={{ margin: 0, fontSize: '18px', color: '#f1f5f9' }}>{word}</h3>
+        {/* Header */}
+        <div style={{
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          padding: '16px 20px', borderBottom: '1px solid #334155', flexShrink: 0,
+        }}>
+          <h3 style={{ margin: 0, fontSize: '20px', color: '#f1f5f9', fontWeight: 600 }}>{word}</h3>
           <div style={{ display: 'flex', gap: '8px' }}>
             <button
-              style={{ padding: '4px 10px', borderRadius: '6px', border: 'none', background: '#0ea5e9', color: '#fff', cursor: 'pointer' }}
+              style={{ padding: '5px 12px', borderRadius: '6px', border: 'none', background: '#0ea5e9', color: '#fff', cursor: 'pointer', fontSize: '15px' }}
+              onMouseDown={(e) => e.stopPropagation()}
               onClick={() => api.tts(word)}
             >
               🔊
             </button>
             <button
-              style={{ padding: '4px 10px', borderRadius: '6px', border: 'none', background: '#334155', color: '#94a3b8', cursor: 'pointer' }}
+              style={{ padding: '5px 12px', borderRadius: '6px', border: 'none', background: '#334155', color: '#94a3b8', cursor: 'pointer', fontSize: '16px', lineHeight: 1 }}
+              onMouseDown={(e) => e.stopPropagation()}
               onClick={onClose}
             >
               ✕
             </button>
           </div>
         </div>
-        {result ? (
-          <>
-            {result.definition && (
-              <p style={{ color: '#94a3b8', margin: '0 0 12px', fontSize: '14px' }}>{result.definition}</p>
-            )}
-            {result.frequency && (
-              <p style={{ color: '#64748b', margin: '0 0 12px', fontSize: '12px' }}>
-                Frequency rank: #{result.frequency}
-              </p>
-            )}
-            {result.vocabEntry ? (
-              <p style={{ color: '#10b981', fontSize: '13px', margin: 0 }}>✓ In vocab book</p>
-            ) : result.definition ? (
-              <button
-                style={{
-                  padding: '6px 14px', borderRadius: '6px', border: 'none',
-                  background: '#3b82f6', color: '#fff', cursor: 'pointer', fontSize: '13px',
-                }}
-                onClick={() => result.definition && api.addVocab(word, result.definition).then(() => {
-                  setResult((r) => r ? { ...r, vocabEntry: { id: 0, entry: word, entryType: 'word', definition: result.definition, familiarity: 0, occurrenceCount: 0, addedAt: '', masteredAt: null } } : r)
-                })}
-              >
-                Add to vocab book
-              </button>
-            ) : null}
-          </>
-        ) : (
-          <p style={{ color: '#64748b', fontSize: '14px' }}>Loading…</p>
-        )}
+
+        {/* Scrollable body */}
+        <div style={{ overflowY: 'auto', padding: '16px 20px', flex: 1 }}>
+          {!result ? (
+            <p style={{ color: '#64748b', fontSize: '14px', margin: 0 }}>Loading…</p>
+          ) : (
+            <>
+              {result.definition ? (
+                <p style={{ color: '#cbd5e1', margin: '0 0 12px', fontSize: '14px', lineHeight: '1.7', whiteSpace: 'pre-wrap' }}>
+                  {result.definition}
+                </p>
+              ) : (
+                <p style={{ color: '#64748b', fontSize: '14px', margin: '0 0 12px' }}>No definition found.</p>
+              )}
+              {result.frequency && (
+                <p style={{ color: '#475569', margin: '0 0 16px', fontSize: '12px' }}>
+                  Frequency rank: #{result.frequency}
+                </p>
+              )}
+              {inVocab ? (
+                <p style={{ color: '#10b981', fontSize: '13px', margin: 0 }}>✓ In vocab book</p>
+              ) : result.definition ? (
+                <button
+                  style={{
+                    padding: '7px 16px', borderRadius: '7px', border: 'none',
+                    background: '#3b82f6', color: '#fff', cursor: 'pointer', fontSize: '13px', fontWeight: 500,
+                  }}
+                  onClick={() => {
+                    const def = result.definition!
+                    api.addVocab(word, def).then(() => setAdded(true))
+                  }}
+                >
+                  + Add to vocab book
+                </button>
+              ) : null}
+            </>
+          )}
+        </div>
       </div>
     </div>
   )
