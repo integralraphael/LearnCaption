@@ -619,7 +619,7 @@ async fn translate_handler(
                 }
             }
         }
-        Ok(translation)
+        Ok::<String, String>(translation)
     });
     match result {
         Ok(t) => (StatusCode::OK, Json(json!({ "translation": t }))).into_response(),

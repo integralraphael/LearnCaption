@@ -1,8 +1,6 @@
 use aho_corasick::{AhoCorasick, MatchKind};
 use serde::{Deserialize, Serialize};
 
-use crate::dictionary::EcdictDictionary;
-
 // NOTE: serde(rename_all = "camelCase") is required on all structs here
 // so field names match the TypeScript interfaces in src/types/subtitle.ts
 
