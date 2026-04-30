@@ -1,5 +1,5 @@
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { getCurrentWindow, currentMonitor } from "@tauri-apps/api/window";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 interface PopoverOptions {
   word: string;
@@ -18,38 +18,24 @@ export async function openWordPopover(opts: PopoverOptions) {
   await closeWordPopover();
 
   const mainWin = getCurrentWindow();
-  const [mainPos, mainSize, scaleFactor] = await Promise.all([
+  const [mainPos, scaleFactor] = await Promise.all([
     mainWin.outerPosition(),
-    mainWin.outerSize(),
     mainWin.scaleFactor(),
   ]);
 
-  const mainX = mainPos.x / scaleFactor;
-  const mainY = mainPos.y / scaleFactor;
-  const mainW = mainSize.width / scaleFactor;
-  const mainH = mainSize.height / scaleFactor;
-
-  // Use the monitor the window is actually on, not window.screen (always primary)
-  const monitor = await currentMonitor().catch(() => null);
-  const sf = monitor?.scaleFactor ?? scaleFactor;
-  const screenBottom = monitor
-    ? (monitor.position.y + monitor.size.height) / sf
-    : window.screen.height;
+  // Absolute screen position of the click (logical pixels)
+  const clickX = mainPos.x / scaleFactor + opts.anchorX;
+  const clickY = mainPos.y / scaleFactor + opts.anchorY;
 
   const popoverWidth = 300;
   const popoverHeight = 280;
 
-  // Horizontally: centered on the clicked word, clamped inside the main window
-  const x = Math.round(
-    Math.max(mainX, Math.min(mainX + mainW - popoverWidth,
-      mainX + opts.anchorX - popoverWidth / 2))
-  );
-
-  // Vertically: overlap the bottom of the main window by 20px so it looks attached.
-  // If the popover would go off-screen below, flip it to overlap the top instead.
-  const yBelow = Math.round(mainY + mainH - 20);
-  const yAbove = Math.round(mainY - popoverHeight + 20);
-  const y = yBelow + popoverHeight <= screenBottom ? yBelow : yAbove;
+  // Center horizontally on the click; appear below the word, or above if in
+  // the bottom portion of the window.
+  const x = Math.round(clickX - popoverWidth / 2);
+  const y = opts.anchorY > window.innerHeight * 0.55
+    ? Math.round(clickY - popoverHeight - 8)
+    : Math.round(clickY + 8);
 
   const base = window.location.origin;
   popoverWindow = new WebviewWindow("word-detail", {
