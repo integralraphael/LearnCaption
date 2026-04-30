@@ -1,5 +1,5 @@
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWindow, currentMonitor } from "@tauri-apps/api/window";
 
 interface PopoverOptions {
   word: string;
@@ -18,11 +18,10 @@ export async function openWordPopover(opts: PopoverOptions) {
   await closeWordPopover();
 
   const mainWin = getCurrentWindow();
-  const [mainPos, mainSize, scaleFactor, monitor] = await Promise.all([
+  const [mainPos, mainSize, scaleFactor] = await Promise.all([
     mainWin.outerPosition(),
     mainWin.outerSize(),
     mainWin.scaleFactor(),
-    mainWin.currentMonitor(),
   ]);
 
   const mainX = mainPos.x / scaleFactor;
@@ -31,6 +30,7 @@ export async function openWordPopover(opts: PopoverOptions) {
   const mainH = mainSize.height / scaleFactor;
 
   // Use the monitor the window is actually on, not window.screen (always primary)
+  const monitor = await currentMonitor().catch(() => null);
   const sf = monitor?.scaleFactor ?? scaleFactor;
   const screenBottom = monitor
     ? (monitor.position.y + monitor.size.height) / sf
