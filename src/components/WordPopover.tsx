@@ -18,16 +18,23 @@ export async function openWordPopover(opts: PopoverOptions) {
   await closeWordPopover();
 
   const mainWin = getCurrentWindow();
-  const [mainPos, mainSize, scaleFactor] = await Promise.all([
+  const [mainPos, mainSize, scaleFactor, monitor] = await Promise.all([
     mainWin.outerPosition(),
     mainWin.outerSize(),
     mainWin.scaleFactor(),
+    mainWin.currentMonitor(),
   ]);
 
   const mainX = mainPos.x / scaleFactor;
   const mainY = mainPos.y / scaleFactor;
   const mainW = mainSize.width / scaleFactor;
   const mainH = mainSize.height / scaleFactor;
+
+  // Use the monitor the window is actually on, not window.screen (always primary)
+  const sf = monitor?.scaleFactor ?? scaleFactor;
+  const screenBottom = monitor
+    ? (monitor.position.y + monitor.size.height) / sf
+    : window.screen.height;
 
   const popoverWidth = 300;
   const popoverHeight = 280;
@@ -42,8 +49,7 @@ export async function openWordPopover(opts: PopoverOptions) {
   // If the popover would go off-screen below, flip it to overlap the top instead.
   const yBelow = Math.round(mainY + mainH - 20);
   const yAbove = Math.round(mainY - popoverHeight + 20);
-  const spaceBelow = window.screen.height - yBelow - popoverHeight;
-  const y = spaceBelow >= 0 ? yBelow : yAbove;
+  const y = yBelow + popoverHeight <= screenBottom ? yBelow : yAbove;
 
   const base = window.location.origin;
   popoverWindow = new WebviewWindow("word-detail", {
