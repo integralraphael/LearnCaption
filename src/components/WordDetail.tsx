@@ -149,16 +149,7 @@ export function WordDetail({ word, context, isPhrase, onClose, onAddToVocab }: P
   };
 
   return (
-    <div
-      style={{
-        background: "#0f172a",
-        border: "1px solid #1e293b",
-        borderRadius: "10px",
-        padding: "16px",
-        width: "100%",
-        boxSizing: "border-box",
-      }}
-    >
+    <div style={{ width: "100%", boxSizing: "border-box", padding: "12px 0" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
         <div>
           <span style={{ color: "#fbbf24", fontSize: "20px", fontWeight: 700 }}>{word}</span>
