@@ -8,6 +8,8 @@ interface MeetingViewConfig {
   colorVocab: string
   colorDifficult: string
   highlightStyle: 'underline' | 'background'
+  /** How to display word-level definitions: none / inline / offset (ruby below word) */
+  defDisplay: 'none' | 'inline' | 'offset'
 }
 
 const DEFAULT_CONFIG: MeetingViewConfig = {
@@ -17,6 +19,7 @@ const DEFAULT_CONFIG: MeetingViewConfig = {
   colorVocab: '#34d399',
   colorDifficult: '#fbbf24',
   highlightStyle: 'underline',
+  defDisplay: 'none',
 }
 
 function parseMeetingConfig(raw: Record<string, unknown>): MeetingViewConfig {
@@ -199,6 +202,14 @@ function ClickableText({ text }: { text: string }) {
   )
 }
 
+/** Truncate ECDICT definition to a short display string */
+function shortDef(def: string | null): string {
+  if (!def) return ''
+  // Take first segment before ';' or '，' and cap at 12 chars
+  const first = def.split(/[;，]/)[0].trim()
+  return first.length > 14 ? first.slice(0, 14) + '…' : first
+}
+
 function AnnotatedLineText({
   tokens,
   config,
@@ -208,38 +219,58 @@ function AnnotatedLineText({
 }) {
   return (
     <>
-      {tokens.map((token, i) =>
-        token.isWord ? (
+      {tokens.map((token, i) => {
+        if (!token.isWord) return <span key={i}>{token.text}</span>
+
+        const isVocab = token.inVocab && config.showVocab
+        const isDiff = token.difficult && config.showDifficult
+        const showHighlight = isVocab || isDiff
+        const color = isVocab ? config.colorVocab : config.colorDifficult
+
+        const highlightCss: React.CSSProperties = showHighlight
+          ? config.highlightStyle === 'background'
+            ? { background: color + '33', borderRadius: '3px', padding: '0 2px' }
+            : { color, textDecoration: 'underline', textDecorationStyle: 'dotted' }
+          : {}
+
+        const def = showHighlight ? shortDef(token.definition) : ''
+        const showDef = def && config.defDisplay !== 'none'
+
+        if (showDef && config.defDisplay === 'offset') {
+          return (
+            <ruby
+              key={i}
+              style={{ rubyPosition: 'under', cursor: 'pointer', ...highlightCss }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = '#334155' }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
+            >
+              {token.text}
+              <rt style={{ fontSize: '10px', color: '#64748b', fontStyle: 'normal', letterSpacing: 0 }}>
+                {def}
+              </rt>
+            </ruby>
+          )
+        }
+
+        return (
           <span
             key={i}
-            style={(() => {
-              const showHighlight = token.inVocab
-                ? config.showVocab
-                : token.difficult
-                ? config.showDifficult
-                : false
-              const color = token.inVocab ? config.colorVocab : config.colorDifficult
-              const highlightStyle: React.CSSProperties = showHighlight
-                ? config.highlightStyle === 'background'
-                  ? { background: color + '33', borderRadius: '3px', padding: '0 2px' }
-                  : { color, textDecoration: 'underline', textDecorationStyle: 'dotted' }
-                : {}
-              return {
-                cursor: 'pointer',
-                borderRadius: '2px',
-                padding: '0 1px',
-                ...highlightStyle,
-              }
-            })()}
+            style={{ cursor: 'pointer', borderRadius: '2px', padding: '0 1px', ...highlightCss }}
             onMouseEnter={(e) => { e.currentTarget.style.background = '#334155' }}
             onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
           >
             {token.text}
+            {showDef && config.defDisplay === 'inline' && (
+              <span style={{
+                fontSize: '10px', color: '#64748b', marginLeft: '1px',
+                fontStyle: 'normal', userSelect: 'none',
+              }}>
+                ({def})
+              </span>
+            )}
           </span>
-        ) : (
-          <span key={i}>{token.text}</span>
         )
-      )}
+      })}
     </>
   )
 }
@@ -438,6 +469,20 @@ function TranscriptView({ meeting, onConfigChange }: TranscriptViewProps) {
               fontSize: '11px', cursor: 'pointer', background: 'transparent', color: '#475569',
             }}
           >{config.highlightStyle === 'underline' ? '下划线' : '背景色'}</button>
+
+          {/* 词义显示 selector */}
+          <select
+            value={config.defDisplay}
+            onChange={(e) => updateConfig({ defDisplay: e.target.value as MeetingViewConfig['defDisplay'] })}
+            style={{
+              padding: '2px 6px', borderRadius: '4px', border: '1px solid #334155',
+              background: '#0f172a', color: '#94a3b8', fontSize: '11px', cursor: 'pointer',
+            }}
+          >
+            <option value="none">词义: 关</option>
+            <option value="inline">词义: 行内</option>
+            <option value="offset">词义: 错位</option>
+          </select>
         </div>
       </div>
       <div style={{ overflowY: 'auto', flex: 1, padding: '16px' }} onClick={handleWordClick}>

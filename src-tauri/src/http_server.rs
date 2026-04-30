@@ -564,7 +564,7 @@ async fn annotate_handler(
             tokenize_text(text).into_iter().map(|(token, is_word)| {
                 if is_word {
                     let lower = token.to_lowercase();
-                    let (in_vocab, definition) = if let Some((_id, def)) = vocab_map.get(&lower) {
+                    let (in_vocab, vocab_def) = if let Some((_id, def)) = vocab_map.get(&lower) {
                         (true, def.clone())
                     } else {
                         (false, None)
@@ -572,6 +572,14 @@ async fn annotate_handler(
                     let difficult = state.dict.frequency(&lower)
                         .map(|f| f > freq_threshold)
                         .unwrap_or(false);
+                    // definition: prefer vocab book entry, fall back to ECDICT for difficult words
+                    let definition = vocab_def.or_else(|| {
+                        if difficult || in_vocab {
+                            state.dict.lookup(&lower).map(|s| s.to_string())
+                        } else {
+                            None
+                        }
+                    });
                     AnnotatedToken { text: token, is_word: true, in_vocab, difficult, definition }
                 } else {
                     AnnotatedToken { text: token, is_word: false, in_vocab: false, difficult: false, definition: None }
