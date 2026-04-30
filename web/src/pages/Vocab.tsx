@@ -4,34 +4,55 @@ import { api, VocabEntry, VocabSentence } from '../api'
 type SortKey = 'occurrenceCount' | 'addedAt' | 'familiarity' | 'entry'
 type Filter = 'all' | 'mastered' | 'unmastered'
 
-// ── Familiarity dots (clickable) ──────────────────────────────────────────────
+// ── Star rating ───────────────────────────────────────────────────────────────
 
-interface FamiliarityDotsProps {
+interface StarRatingProps {
   level: number
-  onSet?: (level: number) => void
+  onSet: (level: number) => void
 }
 
-function FamiliarityDots({ level, onSet }: FamiliarityDotsProps) {
+function StarRating({ level, onSet }: StarRatingProps) {
   const [hovered, setHovered] = useState(0)
-  const interactive = !!onSet
-  const display = interactive && hovered ? hovered : level
+  const display = hovered || level
 
   return (
-    <span style={{ display: 'inline-flex', gap: '4px' }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+      <span style={{ display: 'inline-flex', gap: '2px' }}>
+        {[1, 2, 3, 4, 5].map((i) => (
+          <span
+            key={i}
+            title={`Set familiarity to ${i}`}
+            style={{
+              fontSize: '16px',
+              cursor: 'pointer',
+              color: i <= display ? '#f59e0b' : '#334155',
+              transition: 'color 0.1s',
+              userSelect: 'none',
+            }}
+            onMouseEnter={() => setHovered(i)}
+            onMouseLeave={() => setHovered(0)}
+            onClick={(e) => { e.stopPropagation(); onSet(i) }}
+          >
+            ★
+          </span>
+        ))}
+      </span>
+      {hovered > 0 && (
+        <span style={{ fontSize: '11px', color: '#64748b' }}>
+          {['', 'Beginner', 'Familiar', 'Comfortable', 'Advanced', 'Fluent'][hovered]}
+        </span>
+      )}
+    </div>
+  )
+}
+
+// ── Stars (read-only, compact, for table cell) ────────────────────────────────
+
+function StarDisplay({ level }: { level: number }) {
+  return (
+    <span style={{ display: 'inline-flex', gap: '1px' }}>
       {[1, 2, 3, 4, 5].map((i) => (
-        <span
-          key={i}
-          title={interactive ? `Set familiarity to ${i}` : undefined}
-          style={{
-            width: '9px', height: '9px', borderRadius: '50%',
-            display: 'inline-block', transition: 'background 0.1s',
-            background: i <= display ? '#3b82f6' : '#334155',
-            cursor: interactive ? 'pointer' : 'default',
-          }}
-          onMouseEnter={() => interactive && setHovered(i)}
-          onMouseLeave={() => interactive && setHovered(0)}
-          onClick={(e) => { e.stopPropagation(); onSet?.(i) }}
-        />
+        <span key={i} style={{ fontSize: '13px', color: i <= level ? '#f59e0b' : '#1e293b' }}>★</span>
       ))}
     </span>
   )
@@ -52,7 +73,6 @@ function AddWordModal({ onClose, onAdded }: AddWordModalProps) {
   const wordRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => { wordRef.current?.focus() }, [])
-
   useEffect(() => {
     const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', h)
@@ -122,7 +142,8 @@ function AddWordModal({ onClose, onAdded }: AddWordModalProps) {
 
         <div style={{ marginBottom: '20px' }}>
           <label style={{ fontSize: '12px', color: '#64748b', display: 'block', marginBottom: '4px' }}>
-            Definition {looked && !definition && <span style={{ color: '#f59e0b' }}>— not found in dictionary</span>}
+            Definition
+            {looked && !definition && <span style={{ color: '#f59e0b', marginLeft: '6px' }}>not found in dictionary</span>}
           </label>
           <textarea
             value={definition}
@@ -141,13 +162,8 @@ function AddWordModal({ onClose, onAdded }: AddWordModalProps) {
         <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
           <button
             onClick={onClose}
-            style={{
-              padding: '8px 16px', borderRadius: '7px', border: 'none',
-              background: '#334155', color: '#94a3b8', cursor: 'pointer', fontSize: '13px',
-            }}
-          >
-            Cancel
-          </button>
+            style={{ padding: '8px 16px', borderRadius: '7px', border: 'none', background: '#334155', color: '#94a3b8', cursor: 'pointer', fontSize: '13px' }}
+          >Cancel</button>
           <button
             onClick={submit}
             disabled={!word.trim() || loading}
@@ -157,9 +173,7 @@ function AddWordModal({ onClose, onAdded }: AddWordModalProps) {
               color: '#fff', cursor: word.trim() ? 'pointer' : 'default',
               fontSize: '13px', fontWeight: 500,
             }}
-          >
-            {loading ? 'Adding…' : 'Add'}
-          </button>
+          >{loading ? 'Adding…' : 'Add'}</button>
         </div>
       </div>
     </div>
@@ -184,10 +198,7 @@ function EntryRow({ entry, onUpdate, onDelete }: EntryRowProps) {
   const toggleExpand = () => {
     if (!expanded && sentences.length === 0) {
       setLoadingSentences(true)
-      api.vocabSentences(entry.id).then((data) => {
-        setSentences(data)
-        setLoadingSentences(false)
-      })
+      api.vocabSentences(entry.id).then((data) => { setSentences(data); setLoadingSentences(false) })
     }
     setExpanded(!expanded)
   }
@@ -225,125 +236,139 @@ function EntryRow({ entry, onUpdate, onDelete }: EntryRowProps) {
     <>
       <tr
         onClick={toggleExpand}
-        style={{
-          cursor: 'pointer',
-          background: expanded ? '#1e293b' : 'transparent',
-          borderBottom: '1px solid #1e293b',
-        }}
+        style={{ cursor: 'pointer', background: expanded ? '#1e293b' : 'transparent', borderBottom: '1px solid #1e293b' }}
       >
-        {/* Word */}
-        <td style={{ padding: '10px 16px', color: isMastered ? '#475569' : '#e2e8f0', fontWeight: 500 }}>
-          <span style={{ textDecoration: isMastered ? 'line-through' : 'none' }}>
-            {entry.entry}
-          </span>
+        {/* Word + mastered badge */}
+        <td style={{ padding: '11px 16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{
+              fontWeight: 500,
+              color: isMastered ? '#475569' : '#e2e8f0',
+              textDecoration: isMastered ? 'line-through' : 'none',
+            }}>
+              {entry.entry}
+            </span>
+            {isMastered && (
+              <span style={{
+                fontSize: '10px', fontWeight: 600, padding: '1px 6px',
+                borderRadius: '99px', background: '#064e3b', color: '#34d399',
+                letterSpacing: '0.04em',
+              }}>
+                MASTERED
+              </span>
+            )}
+          </div>
         </td>
 
         {/* Definition (truncated) */}
         <td style={{
-          padding: '10px 16px', color: '#94a3b8', fontSize: '13px',
-          maxWidth: '280px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          padding: '11px 16px', color: '#94a3b8', fontSize: '13px',
+          maxWidth: '260px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         }}>
           {entry.definition ?? <span style={{ color: '#334155' }}>—</span>}
         </td>
 
-        {/* Seen count */}
-        <td style={{ padding: '10px 16px', color: '#64748b', textAlign: 'center' }}>
+        {/* Seen */}
+        <td style={{ padding: '11px 16px', color: '#64748b', textAlign: 'center' }}>
           {entry.occurrenceCount}
         </td>
 
-        {/* Familiarity (clickable dots) */}
-        <td style={{ padding: '10px 16px', textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
-          <FamiliarityDots level={entry.familiarity} onSet={setFamiliarity} />
+        {/* Familiarity — read-only stars in main row */}
+        <td style={{ padding: '11px 16px', textAlign: 'center' }}>
+          <StarDisplay level={entry.familiarity} />
         </td>
 
-        {/* Added date */}
-        <td style={{ padding: '10px 16px', color: '#64748b', fontSize: '12px' }}>
+        {/* Added */}
+        <td style={{ padding: '11px 16px', color: '#64748b', fontSize: '12px' }}>
           {new Date(entry.addedAt).toLocaleDateString()}
         </td>
 
-        {/* Actions */}
-        <td style={{ padding: '10px 8px', textAlign: 'right', whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
-          {/* Mastered toggle */}
+        {/* Mastered toggle only — delete lives in the expanded panel */}
+        <td style={{ padding: '11px 16px', textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
           <button
-            title={isMastered ? 'Click to unmark mastered' : 'Mark as mastered'}
             onClick={toggleMastered}
+            title={isMastered ? 'Click to unmark mastered' : 'Mark as mastered'}
             style={{
-              width: '26px', height: '26px', borderRadius: '50%', border: 'none',
-              cursor: 'pointer',
-              background: isMastered ? '#10b981' : '#1e293b',
-              color: isMastered ? '#fff' : '#475569',
-              fontSize: '13px', marginRight: '4px',
+              padding: '4px 10px', borderRadius: '6px', border: 'none', cursor: 'pointer',
+              fontSize: '12px', fontWeight: 500,
+              background: isMastered ? '#064e3b' : '#1e293b',
+              color: isMastered ? '#34d399' : '#475569',
             }}
-          >✓</button>
-
-          {/* Delete */}
-          <button
-            title="Delete"
-            onClick={confirmDelete}
-            style={{
-              width: '26px', height: '26px', borderRadius: '50%', border: 'none',
-              cursor: 'pointer', background: '#1e293b', color: '#475569', fontSize: '13px',
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = '#7f1d1d'; e.currentTarget.style.color = '#fca5a5' }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = '#1e293b'; e.currentTarget.style.color = '#475569' }}
-          >✕</button>
+            onMouseEnter={(e) => { e.currentTarget.style.background = isMastered ? '#065f46' : '#334155' }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = isMastered ? '#064e3b' : '#1e293b' }}
+          >
+            {isMastered ? '✓ Mastered' : 'Mark mastered'}
+          </button>
         </td>
       </tr>
 
       {/* Expanded panel */}
       {expanded && (
         <tr style={{ background: '#0a1628' }}>
-          <td colSpan={6} style={{ padding: '14px 16px 18px 32px' }}>
-            {/* Quick actions */}
-            <div style={{ display: 'flex', gap: '8px', marginBottom: '14px', flexWrap: 'wrap' }}>
-              <button
-                style={{ padding: '5px 14px', borderRadius: '6px', border: 'none', background: '#0ea5e9', color: '#fff', cursor: 'pointer', fontSize: '13px' }}
-                onClick={(e) => { e.stopPropagation(); api.tts(entry.entry) }}
-              >🔊 Pronounce</button>
-              <button
-                style={{ padding: '5px 14px', borderRadius: '6px', border: 'none', background: '#334155', color: '#94a3b8', cursor: 'pointer', fontSize: '13px' }}
-                onClick={(e) => { e.stopPropagation(); setEditingDef(true); setDraftDef(entry.definition ?? '') }}
-              >✎ Edit definition</button>
-            </div>
+          <td colSpan={6} style={{ padding: '16px 20px 20px 24px' }}>
+            <div style={{ display: 'flex', gap: '32px', flexWrap: 'wrap' }}>
 
-            {/* Inline definition editor */}
-            {editingDef && (
-              <div style={{ marginBottom: '14px' }} onClick={(e) => e.stopPropagation()}>
-                <textarea
-                  value={draftDef}
-                  onChange={(e) => setDraftDef(e.target.value)}
-                  rows={3}
-                  autoFocus
-                  style={{
-                    width: '100%', padding: '8px 12px', borderRadius: '7px',
-                    border: '1px solid #3b82f6', background: '#0f172a',
-                    color: '#e2e8f0', fontSize: '13px', outline: 'none',
-                    resize: 'vertical', boxSizing: 'border-box', marginBottom: '8px',
-                  }}
-                />
-                <div style={{ display: 'flex', gap: '8px' }}>
+              {/* Left: familiarity + actions */}
+              <div style={{ minWidth: '200px' }}>
+                <p style={{ margin: '0 0 8px', fontSize: '11px', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                  Familiarity — click to rate
+                </p>
+                <StarRating level={entry.familiarity} onSet={setFamiliarity} />
+
+                <div style={{ display: 'flex', gap: '8px', marginTop: '16px', flexWrap: 'wrap' }}>
                   <button
-                    onClick={saveDef}
-                    style={{ padding: '5px 14px', borderRadius: '6px', border: 'none', background: '#3b82f6', color: '#fff', cursor: 'pointer', fontSize: '13px' }}
-                  >Save</button>
+                    style={{ padding: '5px 14px', borderRadius: '6px', border: 'none', background: '#0ea5e9', color: '#fff', cursor: 'pointer', fontSize: '13px' }}
+                    onClick={(e) => { e.stopPropagation(); api.tts(entry.entry) }}
+                  >🔊 Pronounce</button>
+
                   <button
-                    onClick={(e) => { e.stopPropagation(); setEditingDef(false) }}
                     style={{ padding: '5px 14px', borderRadius: '6px', border: 'none', background: '#334155', color: '#94a3b8', cursor: 'pointer', fontSize: '13px' }}
-                  >Cancel</button>
-                </div>
-              </div>
-            )}
+                    onClick={(e) => { e.stopPropagation(); setEditingDef(true); setDraftDef(entry.definition ?? '') }}
+                  >✎ Edit definition</button>
 
-            {/* Example sentences */}
-            {loadingSentences ? (
-              <p style={{ color: '#64748b', fontSize: '13px', margin: 0 }}>Loading sentences…</p>
-            ) : sentences.length === 0 ? (
-              <p style={{ color: '#334155', fontSize: '13px', margin: 0 }}>No example sentences yet.</p>
-            ) : (
-              <>
-                <p style={{ color: '#475569', fontSize: '12px', margin: '0 0 8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Example sentences</p>
-                {sentences.map((s) => (
-                  <div key={s.lineId} style={{ marginBottom: '10px', paddingLeft: '12px', borderLeft: '2px solid #1e293b' }}>
+                  {/* Delete — clearly separated, red, in expanded panel */}
+                  <button
+                    style={{ padding: '5px 14px', borderRadius: '6px', border: '1px solid #7f1d1d', background: 'transparent', color: '#f87171', cursor: 'pointer', fontSize: '13px' }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = '#7f1d1d' }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+                    onClick={confirmDelete}
+                  >🗑 Delete</button>
+                </div>
+
+                {/* Inline definition editor */}
+                {editingDef && (
+                  <div style={{ marginTop: '14px' }} onClick={(e) => e.stopPropagation()}>
+                    <textarea
+                      value={draftDef}
+                      onChange={(e) => setDraftDef(e.target.value)}
+                      rows={3}
+                      autoFocus
+                      style={{
+                        width: '100%', padding: '8px 12px', borderRadius: '7px',
+                        border: '1px solid #3b82f6', background: '#0f172a',
+                        color: '#e2e8f0', fontSize: '13px', outline: 'none',
+                        resize: 'vertical', boxSizing: 'border-box', marginBottom: '8px',
+                      }}
+                    />
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button onClick={saveDef} style={{ padding: '5px 14px', borderRadius: '6px', border: 'none', background: '#3b82f6', color: '#fff', cursor: 'pointer', fontSize: '13px' }}>Save</button>
+                      <button onClick={(e) => { e.stopPropagation(); setEditingDef(false) }} style={{ padding: '5px 14px', borderRadius: '6px', border: 'none', background: '#334155', color: '#94a3b8', cursor: 'pointer', fontSize: '13px' }}>Cancel</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Right: example sentences */}
+              <div style={{ flex: 1, minWidth: '200px' }}>
+                <p style={{ margin: '0 0 10px', fontSize: '11px', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                  Example sentences
+                </p>
+                {loadingSentences ? (
+                  <p style={{ color: '#64748b', fontSize: '13px', margin: 0 }}>Loading…</p>
+                ) : sentences.length === 0 ? (
+                  <p style={{ color: '#334155', fontSize: '13px', margin: 0 }}>No example sentences yet.</p>
+                ) : sentences.map((s) => (
+                  <div key={s.lineId} style={{ marginBottom: '10px', paddingLeft: '10px', borderLeft: '2px solid #1e293b' }}>
                     <p style={{ color: '#cbd5e1', fontSize: '13px', margin: '0 0 3px', lineHeight: 1.6 }}>
                       {s.text.split(new RegExp(`(${entry.entry})`, 'i')).map((part, i) =>
                         part.toLowerCase() === entry.entry.toLowerCase()
@@ -354,8 +379,8 @@ function EntryRow({ entry, onUpdate, onDelete }: EntryRowProps) {
                     <span style={{ color: '#334155', fontSize: '11px' }}>{s.meetingTitle}</span>
                   </div>
                 ))}
-              </>
-            )}
+              </div>
+            </div>
           </td>
         </tr>
       )}
@@ -378,17 +403,14 @@ export default function Vocab() {
     api.vocab().then((data) => { setEntries(data); setLoading(false) })
   }, [])
 
-  const handleUpdate = (id: number, patch: Partial<VocabEntry>) => {
+  const handleUpdate = (id: number, patch: Partial<VocabEntry>) =>
     setEntries((prev) => prev.map((e) => e.id === id ? { ...e, ...patch } : e))
-  }
 
-  const handleDelete = (id: number) => {
+  const handleDelete = (id: number) =>
     setEntries((prev) => prev.filter((e) => e.id !== id))
-  }
 
-  const handleAdded = (entry: VocabEntry) => {
+  const handleAdded = (entry: VocabEntry) =>
     setEntries((prev) => [entry, ...prev])
-  }
 
   const sortedFiltered = entries
     .filter((e) => {
@@ -410,28 +432,20 @@ export default function Vocab() {
     else { setSortKey(key); setSortAsc(false) }
   }
 
-  const thStyle = (key: SortKey): React.CSSProperties => ({
-    padding: '10px 16px',
-    cursor: 'pointer',
-    userSelect: 'none',
+  const th = (key: SortKey): React.CSSProperties => ({
+    padding: '10px 16px', cursor: 'pointer', userSelect: 'none',
     color: sortKey === key ? '#e2e8f0' : '#64748b',
-    fontWeight: 600,
-    fontSize: '12px',
-    textTransform: 'uppercase',
-    letterSpacing: '0.05em',
-    textAlign: 'left',
+    fontWeight: 600, fontSize: '12px',
+    textTransform: 'uppercase', letterSpacing: '0.05em', textAlign: 'left',
   })
 
   if (loading) return <p style={{ color: '#64748b', padding: '20px' }}>Loading…</p>
 
   return (
     <div style={{ padding: '20px', height: 'calc(100vh - 49px)', overflowY: 'auto' }}>
-      {/* Toolbar */}
       <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
         <input
-          type="text"
-          placeholder="Search…"
-          value={search}
+          type="text" placeholder="Search…" value={search}
           onChange={(e) => setSearch(e.target.value)}
           style={{
             padding: '6px 12px', borderRadius: '6px', border: '1px solid #334155',
@@ -439,59 +453,46 @@ export default function Vocab() {
           }}
         />
         {(['all', 'mastered', 'unmastered'] as Filter[]).map((f) => (
-          <button
-            key={f}
-            onClick={() => setFilter(f)}
-            style={{
-              padding: '5px 14px', borderRadius: '6px', border: 'none',
-              background: filter === f ? '#334155' : 'transparent',
-              color: filter === f ? '#e2e8f0' : '#64748b',
-              cursor: 'pointer', fontSize: '13px',
-            }}
-          >
+          <button key={f} onClick={() => setFilter(f)} style={{
+            padding: '5px 14px', borderRadius: '6px', border: 'none', cursor: 'pointer', fontSize: '13px',
+            background: filter === f ? '#334155' : 'transparent',
+            color: filter === f ? '#e2e8f0' : '#64748b',
+          }}>
             {f.charAt(0).toUpperCase() + f.slice(1)}
           </button>
         ))}
         <span style={{ color: '#334155', fontSize: '13px' }}>{sortedFiltered.length} entries</span>
-
         <button
           onClick={() => setShowAdd(true)}
           style={{
             marginLeft: 'auto', padding: '6px 16px', borderRadius: '7px', border: 'none',
             background: '#3b82f6', color: '#fff', cursor: 'pointer', fontSize: '13px', fontWeight: 500,
           }}
-        >
-          + Add word
-        </button>
+        >+ Add word</button>
       </div>
 
-      {/* Table */}
       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
         <thead>
           <tr style={{ background: '#1e293b' }}>
-            <th style={thStyle('entry')} onClick={() => toggleSort('entry')}>
+            <th style={th('entry')} onClick={() => toggleSort('entry')}>
               Word {sortKey === 'entry' ? (sortAsc ? '↑' : '↓') : ''}
             </th>
-            <th style={{ ...thStyle('entry'), cursor: 'default' }}>Definition</th>
-            <th style={thStyle('occurrenceCount')} onClick={() => toggleSort('occurrenceCount')}>
+            <th style={{ ...th('entry'), cursor: 'default' }}>Definition</th>
+            <th style={th('occurrenceCount')} onClick={() => toggleSort('occurrenceCount')}>
               Seen {sortKey === 'occurrenceCount' ? (sortAsc ? '↑' : '↓') : ''}
             </th>
-            <th style={thStyle('familiarity')} onClick={() => toggleSort('familiarity')}>
+            <th style={th('familiarity')} onClick={() => toggleSort('familiarity')}>
               Familiarity {sortKey === 'familiarity' ? (sortAsc ? '↑' : '↓') : ''}
             </th>
-            <th style={thStyle('addedAt')} onClick={() => toggleSort('addedAt')}>
+            <th style={th('addedAt')} onClick={() => toggleSort('addedAt')}>
               Added {sortKey === 'addedAt' ? (sortAsc ? '↑' : '↓') : ''}
             </th>
-            <th style={{ width: '72px' }} />
+            <th style={{ width: '130px' }} />
           </tr>
         </thead>
         <tbody>
           {sortedFiltered.length === 0 ? (
-            <tr>
-              <td colSpan={6} style={{ padding: '40px', textAlign: 'center', color: '#334155' }}>
-                No entries found.
-              </td>
-            </tr>
+            <tr><td colSpan={6} style={{ padding: '40px', textAlign: 'center', color: '#334155' }}>No entries found.</td></tr>
           ) : sortedFiltered.map((e) => (
             <EntryRow key={e.id} entry={e} onUpdate={handleUpdate} onDelete={handleDelete} />
           ))}
