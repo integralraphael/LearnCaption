@@ -1,6 +1,28 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, AnnotatedToken, Meeting, TranscriptLine, WordResult } from '../api'
 
+interface MeetingViewConfig {
+  showVocab: boolean
+  showDifficult: boolean
+  translationMode: 'none' | 'demand' | 'all'
+  colorVocab: string
+  colorDifficult: string
+  highlightStyle: 'underline' | 'background'
+}
+
+const DEFAULT_CONFIG: MeetingViewConfig = {
+  showVocab: true,
+  showDifficult: true,
+  translationMode: 'demand',
+  colorVocab: '#34d399',
+  colorDifficult: '#fbbf24',
+  highlightStyle: 'underline',
+}
+
+function parseMeetingConfig(raw: Record<string, unknown>): MeetingViewConfig {
+  return { ...DEFAULT_CONFIG, ...raw } as MeetingViewConfig
+}
+
 function SourceBadge({ source }: { source: string }) {
   const isGoogle = source === 'browser'
   return (
@@ -179,8 +201,10 @@ function ClickableText({ text }: { text: string }) {
 
 function AnnotatedLineText({
   tokens,
+  config,
 }: {
   tokens: AnnotatedToken[]
+  config: MeetingViewConfig
 }) {
   return (
     <>
@@ -188,14 +212,25 @@ function AnnotatedLineText({
         token.isWord ? (
           <span
             key={i}
-            style={{
-              cursor: 'pointer',
-              borderRadius: '2px',
-              padding: '0 1px',
-              color: token.inVocab ? '#34d399' : token.difficult ? '#fbbf24' : undefined,
-              textDecoration: (token.inVocab || token.difficult) ? 'underline' : undefined,
-              textDecorationStyle: 'dotted',
-            }}
+            style={(() => {
+              const showHighlight = token.inVocab
+                ? config.showVocab
+                : token.difficult
+                ? config.showDifficult
+                : false
+              const color = token.inVocab ? config.colorVocab : config.colorDifficult
+              const highlightStyle: React.CSSProperties = showHighlight
+                ? config.highlightStyle === 'background'
+                  ? { background: color + '33', borderRadius: '3px', padding: '0 2px' }
+                  : { color, textDecoration: 'underline', textDecorationStyle: 'dotted' }
+                : {}
+              return {
+                cursor: 'pointer',
+                borderRadius: '2px',
+                padding: '0 1px',
+                ...highlightStyle,
+              }
+            })()}
             onMouseEnter={(e) => { e.currentTarget.style.background = '#334155' }}
             onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
           >
@@ -211,10 +246,12 @@ function AnnotatedLineText({
 
 interface TranscriptViewProps {
   meeting: Meeting
+  onConfigChange: (config: MeetingViewConfig) => void
 }
 
-function TranscriptView({ meeting }: TranscriptViewProps) {
+function TranscriptView({ meeting, onConfigChange }: TranscriptViewProps) {
   const meetingId = meeting.id
+  const [config, setConfig] = useState<MeetingViewConfig>(() => parseMeetingConfig(meeting.config))
   const [lines, setLines] = useState<TranscriptLine[]>([])
   const [selectedWord, setSelectedWord] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -222,6 +259,13 @@ function TranscriptView({ meeting }: TranscriptViewProps) {
   const [translations, setTranslations] = useState<Record<number, string>>({})
   const [translating, setTranslating] = useState<Record<number, boolean>>({})
   const [freqThreshold, setFreqThreshold] = useState(3000)
+
+  const updateConfig = (patch: Partial<MeetingViewConfig>) => {
+    const next = { ...config, ...patch }
+    setConfig(next)
+    onConfigChange(next)
+    api.updateMeetingConfig(meeting.id, next as Record<string, unknown>).catch(() => {})
+  }
 
   useEffect(() => {
     api.setting('ai_translate_frq_threshold')
@@ -239,8 +283,8 @@ function TranscriptView({ meeting }: TranscriptViewProps) {
       setLoading(false)
       // Seed translations from cached DB values — group by speaker blocks,
       // use first non-null translation found in each block.
-      const cached: Record<number, string> = {}
       const blocks = groupBySpeaker(data)
+      const cached: Record<number, string> = {}
       blocks.forEach((block, bi) => {
         const t = block.lines.find(l => l.translation)?.translation
         if (t) cached[bi] = t
@@ -256,6 +300,24 @@ function TranscriptView({ meeting }: TranscriptViewProps) {
       setAnnotated(result)
     }).catch(() => {})
   }, [lines])
+
+  useEffect(() => {
+    if (config.translationMode !== 'all' || lines.length === 0) return
+    const blocks = groupBySpeaker(lines)
+    blocks.forEach((block, bi) => {
+      // Skip blocks that already have a cached translation
+      if (block.lines.some(l => l.translation)) return
+      // Skip if already translating or translated in state
+      if (translations[bi] || translating[bi]) return
+      setTranslating(prev => ({ ...prev, [bi]: true }))
+      const text = block.lines.map(l => l.text).join(' ')
+      const lineIds = block.lines.map(l => l.id)
+      api.translate(text, lineIds).then(r => {
+        if (r.translation) setTranslations(prev => ({ ...prev, [bi]: r.translation! }))
+        setTranslating(prev => ({ ...prev, [bi]: false }))
+      }).catch(() => setTranslating(prev => ({ ...prev, [bi]: false })))
+    })
+  }, [config.translationMode, lines])
 
   const handleWordClick = (e: React.MouseEvent<HTMLDivElement>) => {
     const target = e.target as HTMLElement
@@ -285,6 +347,58 @@ function TranscriptView({ meeting }: TranscriptViewProps) {
         <span style={{ color: '#475569', fontSize: '12px', flexShrink: 0 }}>
           {new Date(meeting.startedAt).toLocaleString()}
         </span>
+        {/* Settings toolbar */}
+        <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexShrink: 0 }}>
+          {/* 生词 toggle */}
+          <button
+            onClick={() => updateConfig({ showVocab: !config.showVocab })}
+            title="生词高亮"
+            style={{
+              padding: '2px 8px', borderRadius: '4px', border: '1px solid',
+              fontSize: '11px', cursor: 'pointer',
+              background: config.showVocab ? 'rgba(52,211,153,0.15)' : 'transparent',
+              borderColor: config.showVocab ? '#34d399' : '#334155',
+              color: config.showVocab ? '#34d399' : '#475569',
+            }}
+          >生词</button>
+
+          {/* 超纲 toggle */}
+          <button
+            onClick={() => updateConfig({ showDifficult: !config.showDifficult })}
+            title="超纲词高亮"
+            style={{
+              padding: '2px 8px', borderRadius: '4px', border: '1px solid',
+              fontSize: '11px', cursor: 'pointer',
+              background: config.showDifficult ? 'rgba(251,191,36,0.15)' : 'transparent',
+              borderColor: config.showDifficult ? '#fbbf24' : '#334155',
+              color: config.showDifficult ? '#fbbf24' : '#475569',
+            }}
+          >超纲</button>
+
+          {/* 翻译 mode selector */}
+          <select
+            value={config.translationMode}
+            onChange={(e) => updateConfig({ translationMode: e.target.value as MeetingViewConfig['translationMode'] })}
+            style={{
+              padding: '2px 6px', borderRadius: '4px', border: '1px solid #334155',
+              background: '#0f172a', color: '#94a3b8', fontSize: '11px', cursor: 'pointer',
+            }}
+          >
+            <option value="none">翻译: 关</option>
+            <option value="demand">翻译: 按需</option>
+            <option value="all">翻译: 全文</option>
+          </select>
+
+          {/* 高亮样式 toggle */}
+          <button
+            onClick={() => updateConfig({ highlightStyle: config.highlightStyle === 'underline' ? 'background' : 'underline' })}
+            title="高亮样式"
+            style={{
+              padding: '2px 8px', borderRadius: '4px', border: '1px solid #334155',
+              fontSize: '11px', cursor: 'pointer', background: 'transparent', color: '#475569',
+            }}
+          >{config.highlightStyle === 'underline' ? '下划线' : '背景色'}</button>
+        </div>
       </div>
       <div style={{ overflowY: 'auto', flex: 1, padding: '16px' }} onClick={handleWordClick}>
         {loading && <p style={{ color: '#64748b', margin: 0 }}>Loading transcript…</p>}
@@ -316,7 +430,7 @@ function TranscriptView({ meeting }: TranscriptViewProps) {
                         <span key={line.id}>
                           {li > 0 && ' '}
                           {tokens
-                            ? <AnnotatedLineText tokens={tokens} />
+                            ? <AnnotatedLineText tokens={tokens} config={config} />
                             : <ClickableText text={line.text} />
                           }
                         </span>
@@ -324,35 +438,37 @@ function TranscriptView({ meeting }: TranscriptViewProps) {
                     })}
                   </p>
                   {/* Translation result */}
-                  {translations[bi] && (
+                  {config.translationMode !== 'none' && translations[bi] && (
                     <p style={{ margin: '4px 0 0', color: '#64748b', fontSize: '13px', lineHeight: '1.6' }}>
                       {translations[bi]}
                     </p>
                   )}
                   {/* Translate button */}
-                  <button
-                    onClick={() => {
-                      setTranslating(prev => ({ ...prev, [bi]: true }))
-                      const text = block.lines.map(l => l.text).join(' ')
-                      const lineIds = block.lines.map(l => l.id)
-                      api.translate(text, lineIds).then(r => {
-                        if (r.translation) setTranslations(prev => ({ ...prev, [bi]: r.translation! }))
-                        setTranslating(prev => ({ ...prev, [bi]: false }))
-                      }).catch(() => setTranslating(prev => ({ ...prev, [bi]: false })))
-                    }}
-                    disabled={translating[bi]}
-                    style={{
-                      marginTop: '4px',
-                      background: 'none',
-                      border: 'none',
-                      color: translating[bi] ? '#475569' : '#334155',
-                      cursor: translating[bi] ? 'default' : 'pointer',
-                      fontSize: '11px',
-                      padding: '0',
-                    }}
-                  >
-                    {translating[bi] ? '翻译中…' : translations[bi] ? '重新翻译' : '翻译'}
-                  </button>
+                  {config.translationMode !== 'none' && (
+                    <button
+                      onClick={() => {
+                        setTranslating(prev => ({ ...prev, [bi]: true }))
+                        const text = block.lines.map(l => l.text).join(' ')
+                        const lineIds = block.lines.map(l => l.id)
+                        api.translate(text, lineIds).then(r => {
+                          if (r.translation) setTranslations(prev => ({ ...prev, [bi]: r.translation! }))
+                          setTranslating(prev => ({ ...prev, [bi]: false }))
+                        }).catch(() => setTranslating(prev => ({ ...prev, [bi]: false })))
+                      }}
+                      disabled={translating[bi]}
+                      style={{
+                        marginTop: '4px',
+                        background: 'none',
+                        border: 'none',
+                        color: translating[bi] ? '#475569' : '#334155',
+                        cursor: translating[bi] ? 'default' : 'pointer',
+                        fontSize: '11px',
+                        padding: '0',
+                      }}
+                    >
+                      {translating[bi] ? '翻译中…' : translations[bi] ? '重新翻译' : '翻译'}
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -459,6 +575,10 @@ export default function Meetings() {
     setMeetings((prev) => prev.map((m) => m.id === id ? { ...m, title } : m))
   }
 
+  const handleConfigChange = (id: number, config: MeetingViewConfig) => {
+    setMeetings(prev => prev.map(m => m.id === id ? { ...m, config: config as Record<string, unknown> } : m))
+  }
+
   if (loading) return <p style={{ color: '#64748b', padding: '20px' }}>Loading…</p>
 
   return (
@@ -484,7 +604,10 @@ export default function Meetings() {
       {/* Right panel: transcript */}
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
         {selected ? (
-          <TranscriptView meeting={meetings.find(m => m.id === selected)!} />
+          <TranscriptView
+            meeting={meetings.find(m => m.id === selected)!}
+            onConfigChange={(cfg) => handleConfigChange(selected!, cfg)}
+          />
         ) : (
           <p style={{ color: '#475569', padding: '20px' }}>Select a meeting to view its transcript.</p>
         )}

@@ -6,6 +6,7 @@ export interface Meeting {
   startedAt: string;
   endedAt: string | null;
   source: string;
+  config: Record<string, unknown>;
 }
 
 export interface TranscriptLine {
@@ -83,4 +84,6 @@ export const api = {
   setting: (key: string) => get<{ value: string | null }>(`/settings/${key}`),
   annotate: (texts: string[]) => post<AnnotatedToken[][]>('/annotate', { texts }),
   translate: (text: string, lineIds: number[]) => post<{ translation?: string; error?: string }>('/translate', { text, lineIds }),
+  updateMeetingConfig: (id: number, config: Record<string, unknown>) =>
+    post<{ ok: boolean }>(`/meetings/${id}/config`, { config }),
 };

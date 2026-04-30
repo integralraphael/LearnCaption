@@ -52,6 +52,7 @@ pub async fn run(
         .route("/status", get(status_handler))
         .route("/meetings", get(list_meetings_handler))
         .route("/meetings/:id/title", post(rename_meeting_handler))
+        .route("/meetings/:id/config", post(update_meeting_config_handler))
         .route("/meetings/:id/transcript", get(get_transcript_handler))
         .route("/vocab", get(list_vocab_handler))
         .route("/vocab", post(add_vocab_handler))
@@ -108,6 +109,7 @@ struct MeetingDto {
     started_at: String,
     ended_at: Option<String>,
     source: String,
+    config: serde_json::Value,
 }
 
 #[derive(Deserialize)]
@@ -134,11 +136,36 @@ async fn rename_meeting_handler(
     }
 }
 
+#[derive(Deserialize)]
+struct UpdateConfigBody {
+    config: serde_json::Value,
+}
+
+async fn update_meeting_config_handler(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(body): Json<UpdateConfigBody>,
+) -> impl IntoResponse {
+    let config_str = serde_json::to_string(&body.config).unwrap_or_default();
+    let result = block_in_place(|| {
+        let conn = state.db.lock().map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE meetings SET config = ?1 WHERE id = ?2",
+            rusqlite::params![config_str, id],
+        ).map_err(|e| e.to_string())?;
+        Ok::<_, String>(())
+    });
+    match result {
+        Ok(()) => (StatusCode::OK, Json(json!({ "ok": true }))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e }))),
+    }
+}
+
 async fn list_meetings_handler(State(state): State<AppState>) -> ApiResult<Vec<MeetingDto>> {
     block_in_place(|| {
         let conn = state.db.lock().map_err(|e| db_err(e))?;
         let mut stmt = conn.prepare(
-            "SELECT id, title, started_at, ended_at, source FROM meetings ORDER BY started_at DESC",
+            "SELECT id, title, started_at, ended_at, source, config FROM meetings ORDER BY started_at DESC",
         ).map_err(|e| db_err(e))?;
         let rows = stmt.query_map([], |row| Ok(MeetingDto {
             id: row.get(0)?,
@@ -146,6 +173,10 @@ async fn list_meetings_handler(State(state): State<AppState>) -> ApiResult<Vec<M
             started_at: row.get(2)?,
             ended_at: row.get(3)?,
             source: row.get(4)?,
+            config: {
+                let s: String = row.get(5).unwrap_or_default();
+                serde_json::from_str(&s).unwrap_or(serde_json::Value::Object(Default::default()))
+            },
         })).map_err(|e| db_err(e))?
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(|e| db_err(e))?;
