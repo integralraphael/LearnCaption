@@ -303,20 +303,34 @@ function TranscriptView({ meeting, onConfigChange }: TranscriptViewProps) {
 
   useEffect(() => {
     if (config.translationMode !== 'all' || lines.length === 0) return
+    let cancelled = false
+
     const blocks = groupBySpeaker(lines)
-    blocks.forEach((block, bi) => {
-      // Skip blocks that already have a cached translation
-      if (block.lines.some(l => l.translation)) return
-      // Skip if already translating or translated in state
-      if (translations[bi] || translating[bi]) return
-      setTranslating(prev => ({ ...prev, [bi]: true }))
-      const text = block.lines.map(l => l.text).join(' ')
-      const lineIds = block.lines.map(l => l.id)
-      api.translate(text, lineIds).then(r => {
-        if (r.translation) setTranslations(prev => ({ ...prev, [bi]: r.translation! }))
-        setTranslating(prev => ({ ...prev, [bi]: false }))
-      }).catch(() => setTranslating(prev => ({ ...prev, [bi]: false })))
-    })
+    // Only blocks without a cached DB translation need to be translated
+    const todo = blocks
+      .map((block, bi) => ({ block, bi }))
+      .filter(({ block }) => !block.lines.some(l => l.translation))
+
+    if (todo.length === 0) return
+
+    // Translate sequentially — one block at a time so the model isn't swamped.
+    // Each result appears immediately as it finishes.
+    ;(async () => {
+      for (const { block, bi } of todo) {
+        if (cancelled) break
+        setTranslating(prev => ({ ...prev, [bi]: true }))
+        try {
+          const text = block.lines.map(l => l.text).join(' ')
+          const lineIds = block.lines.map(l => l.id)
+          const r = await api.translate(text, lineIds)
+          if (!cancelled && r.translation)
+            setTranslations(prev => ({ ...prev, [bi]: r.translation! }))
+        } catch {}
+        if (!cancelled) setTranslating(prev => ({ ...prev, [bi]: false }))
+      }
+    })()
+
+    return () => { cancelled = true }
   }, [config.translationMode, lines])
 
   const handleWordClick = (e: React.MouseEvent<HTMLDivElement>) => {
