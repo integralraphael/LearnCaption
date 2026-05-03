@@ -248,7 +248,17 @@ export function SubtitleWindow({ onWordClick, onPhraseSelect, onScrollState }: P
 
   return (
     <>
-      <style>{`.lc-subtitle-area::-webkit-scrollbar { display: none; }`}</style>
+      <style>{`
+        .lc-subtitle-area::-webkit-scrollbar { display: none; }
+        .lc-line-translation::before {
+          content: attr(data-text);
+          display: block;
+          font-size: 12px;
+          color: #64748b;
+          line-height: 1.6;
+          margin-top: -4px;
+        }
+      `}</style>
       <div
         ref={containerRef}
         className="lc-subtitle-area"
@@ -309,15 +319,10 @@ export function SubtitleWindow({ onWordClick, onPhraseSelect, onScrollState }: P
                   onWordClick={onWordClick}
                 />
                 {lineTranslations.get(line.lineId) && (
-                  <div style={{
-                    fontSize: "12px",
-                    color: "#64748b",
-                    lineHeight: "1.6",
-                    marginTop: "-4px",
-                    userSelect: "none",
-                  }}>
-                    {lineTranslations.get(line.lineId)}
-                  </div>
+                  <div
+                    className="lc-line-translation"
+                    data-text={lineTranslations.get(line.lineId)}
+                  />
                 )}
               </div>
             </div>
