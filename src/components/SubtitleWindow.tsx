@@ -223,9 +223,17 @@ export function SubtitleWindow({ onWordClick, onPhraseSelect, onScrollState }: P
     const text = sel?.toString().trim();
     if (!text || text.split(/\s+/).length < 2) return;
     const node = sel?.anchorNode;
-    const lineEl = (node instanceof HTMLElement ? node : node?.parentElement)?.closest("[data-raw-text]");
-    const rawText = lineEl?.getAttribute("data-raw-text") ?? "";
-    onPhraseSelect(text, rawText);
+    const lineEl = (node instanceof HTMLElement ? node : node?.parentElement)?.closest("[data-line-id]");
+    const lineId = lineEl ? parseInt(lineEl.getAttribute("data-line-id") ?? "-1", 10) : -1;
+    // Build sentence context from the surrounding lines (prev + current + next)
+    // Caption stream often splits one sentence across multiple lines.
+    const idx = lines.findIndex(l => l.lineId === lineId);
+    const context = [
+      idx > 0 ? lines[idx - 1].rawText : "",
+      idx >= 0 ? lines[idx].rawText : "",
+      idx >= 0 && idx < lines.length - 1 ? lines[idx + 1].rawText : "",
+    ].filter(Boolean).join(" ");
+    onPhraseSelect(text, context || text);
     sel?.removeAllRanges();
   };
 
@@ -283,6 +291,7 @@ export function SubtitleWindow({ onWordClick, onPhraseSelect, onScrollState }: P
           lines.map((line, i) => (
             <div
               key={line.lineId + "-" + i}
+              data-line-id={line.lineId}
               data-raw-text={line.rawText}
               style={{ display: "flex", alignItems: "flex-start", marginBottom: "4px" }}
             >
