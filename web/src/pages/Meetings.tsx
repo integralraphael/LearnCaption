@@ -267,7 +267,10 @@ function AnnotatedLineText({
             : { color, textDecoration: 'underline', textDecorationStyle: 'dotted' }
           : {}
 
-        const def = showHighlight ? shortDef(token.definition) : ''
+        const def = isVocab ? shortDef(token.definition) : ''
+        // Only show inline/offset definition for vocab-book words.
+        // Difficult-but-not-vocab words get color highlight only —
+        // showing mid-sentence definitions for them causes noise (e.g. phrasal verbs).
         const showDef = def && config.defDisplay !== 'none'
 
         if (showDef && config.defDisplay === 'offset') {
