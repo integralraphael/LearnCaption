@@ -18,6 +18,7 @@ pub struct EcdictDictionary {
 /// Frequency rank threshold: words with frq above this are considered
 /// "difficult" and auto-added to vocab. frq is a rank (1 = most common).
 /// 3000 filters out ~3000 most common words (the, go, think, believe, …).
+#[allow(dead_code)]
 pub const AUTO_VOCAB_FRQ_THRESHOLD: u32 = 3000;
 
 impl EcdictDictionary {
@@ -92,6 +93,7 @@ impl EcdictDictionary {
     }
 
     /// Check if a word is "difficult" enough to auto-add to vocabulary.
+    #[allow(dead_code)]
     pub fn is_difficult(&self, word: &str) -> bool {
         match self.frequency(word) {
             Some(frq) => frq > AUTO_VOCAB_FRQ_THRESHOLD,
@@ -149,6 +151,7 @@ impl EcdictDictionary {
     /// Look up translation + difficulty for auto-vocab.
     /// Tries exact match first, then Snowball stem, all validated against dict.
     /// Returns (base_word, definition, is_difficult).
+    #[allow(dead_code)]
     pub fn lookup_with_difficulty(&self, word: &str) -> Option<(String, &str, bool)> {
         let lower = word.to_lowercase();
 

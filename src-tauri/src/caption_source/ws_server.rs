@@ -16,6 +16,7 @@ pub struct ExtensionMessage {
     pub msg_type: String,
     pub text: Option<String>,
     pub speaker: Option<String>,
+    #[allow(dead_code)]
     pub avatar: Option<String>,
     /// "new_block" | "append" | "update"
     pub action: Option<String>,

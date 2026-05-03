@@ -1,3 +1,7 @@
+// objc macros (class!, msg_send!) emit cargo-clippy cfg checks that trigger
+// unexpected_cfgs on current Rust toolchains. Suppress until objc crate is updated.
+#![allow(unexpected_cfgs)]
+
 mod commands;
 mod caption_source;
 mod db;

@@ -34,6 +34,7 @@ pub struct VocabEntry {
     pub entry: String,            // e.g. "leverage" or "look forward to"
     pub definition: String,
     pub occurrence_count: u32,
+    #[allow(dead_code)]
     pub familiarity: u8,
 }
 
