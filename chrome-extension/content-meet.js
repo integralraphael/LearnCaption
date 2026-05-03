@@ -9,18 +9,25 @@ if (window.__learnCaptionAttached) {
   // blockState: block element → array of sentence strings already sent
   const blockState = new WeakMap();
 
-  // Set to false on first chrome API failure; all subsequent calls become no-ops.
-  let contextAlive = true;
+  // Tracks consecutive send failures to detect true context invalidation.
+  let sendFailures = 0;
 
   function safeSend(msg) {
-    if (!contextAlive) return;
     try {
       chrome.runtime.sendMessage(msg, () => {
         try { void chrome.runtime.lastError; } catch (_) {}
       });
-    } catch (_) {
-      contextAlive = false;
-      teardown();
+      sendFailures = 0; // reset on success
+    } catch (err) {
+      sendFailures++;
+      // "Extension context invalidated" means the extension was reloaded/updated;
+      // the content script is now orphaned — tear down permanently.
+      // Transient errors (e.g. service worker momentarily sleeping) recover on next call.
+      const msg_ = (err && err.message) ? err.message : '';
+      if (msg_.includes('invalidated') || sendFailures >= 5) {
+        teardown();
+      }
+      // Otherwise just skip this message and try again next time.
     }
   }
 

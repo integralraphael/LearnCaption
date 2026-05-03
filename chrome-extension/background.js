@@ -47,7 +47,8 @@ chrome.runtime.onMessage.addListener((message) => {
     return;
   }
 
-  if (message.type !== "caption") return;
+  // Forward caption and meeting_title messages to the desktop app via WS
+  if (message.type !== "caption" && message.type !== "meeting_title") return;
   const json = JSON.stringify(message);
   if (ws?.readyState === WebSocket.OPEN) {
     console.log("[LearnCaption] ws.send:", json);
