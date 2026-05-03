@@ -450,6 +450,20 @@ function TranscriptView({ meeting, onConfigChange }: TranscriptViewProps) {
     }
   }
 
+  const handleMouseUp = () => {
+    const sel = window.getSelection()
+    const text = sel?.toString().trim() ?? ''
+    // Only fire for multi-word selections (phrases / whole sentences)
+    if (!text || text.split(/\s+/).length < 2) return
+    // Get sentence context from the containing <p>
+    const node = sel?.anchorNode
+    const p = (node instanceof HTMLElement ? node : node?.parentElement)?.closest('p')
+    const ctx = p?.textContent?.trim() ?? ''
+    sel?.removeAllRanges()
+    setSelectedWord(text)
+    setSelectedContext(ctx)
+  }
+
   const blocks = loading ? [] : groupBySpeaker(lines)
 
   return (
@@ -537,7 +551,7 @@ function TranscriptView({ meeting, onConfigChange }: TranscriptViewProps) {
           </select>
         </div>
       </div>
-      <div style={{ overflowY: 'auto', flex: 1, padding: '16px' }} onClick={handleWordClick}>
+      <div style={{ overflowY: 'auto', flex: 1, padding: '16px' }} onClick={handleWordClick} onMouseUp={handleMouseUp}>
         {loading && <p style={{ color: '#64748b', margin: 0 }}>Loading transcript…</p>}
         {!loading && lines.length === 0 && <p style={{ color: '#64748b', margin: 0 }}>No transcript lines.</p>}
         {blocks.map((block, bi) => (
