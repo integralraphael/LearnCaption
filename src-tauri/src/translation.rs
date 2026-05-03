@@ -232,11 +232,20 @@ pub fn translate_sync(
 
     let trimmed = output.trim().to_string();
 
-    // Guard: if translating a single word but output is suspiciously long,
-    // the model likely translated the entire context sentence — signal frontend to use ECDICT.
-    let is_single_word = !selection.contains(' ');
-    if is_single_word && trimmed.chars().count() > 15 {
-        return Err("AI_OUTPUT_TOO_LONG".into());
+    // Guard: for words and short phrases (≤3 words) the output should be concise.
+    // If it's suspiciously long, the model likely translated the whole context sentence
+    // instead of just the selection — signal caller to retry word-only or fall back to ECDICT.
+    // Sentences (4+ words) are expected to produce long output, so no guard.
+    let word_count = selection.split_whitespace().count();
+    let max_chars: Option<usize> = match word_count {
+        1 => Some(15),
+        2 | 3 => Some(30),
+        _ => None,
+    };
+    if let Some(limit) = max_chars {
+        if trimmed.chars().count() > limit {
+            return Err("AI_OUTPUT_TOO_LONG".into());
+        }
     }
 
     Ok(trimmed)
