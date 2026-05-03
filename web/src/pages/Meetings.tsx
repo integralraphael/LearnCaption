@@ -60,18 +60,51 @@ function duration(m: Meeting) {
 
 interface WordPopupProps {
   word: string
+  freqThreshold: number
   onClose: () => void
 }
 
-function WordPopup({ word, onClose }: WordPopupProps) {
+function WordPopup({ word, freqThreshold, onClose }: WordPopupProps) {
   const [result, setResult] = useState<WordResult | null>(null)
+  const [translation, setTranslation] = useState<string | null>(null)
+  const [translating, setTranslating] = useState(false)
   const [added, setAdded] = useState(false)
 
   useEffect(() => {
     setResult(null)
+    setTranslation(null)
+    setTranslating(false)
     setAdded(false)
-    api.word(word).then(setResult).catch(() => setResult(null))
-  }, [word])
+    let cancelled = false
+
+    api.word(word).then(r => {
+      if (cancelled) return
+      setResult(r)
+
+      // 1. Vocab book definition is authoritative — skip AI
+      if (r.vocabEntry) {
+        setTranslation(r.vocabEntry.definition ?? r.definition ?? null)
+        return
+      }
+
+      // 2. Show ECDICT immediately
+      if (r.definition) setTranslation(r.definition)
+
+      // 3. Common word (below threshold) — ECDICT only, no AI
+      if (r.frequency != null && r.frequency < freqThreshold) return
+
+      // 4. Difficult / unknown word — run AI, keep shorter result
+      setTranslating(true)
+      api.translate(word, []).then(res => {
+        if (cancelled || !res.translation) return
+        const ecdict = r.definition ?? null
+        const ai = res.translation
+        setTranslation(!ecdict || ai.length < ecdict.length ? ai : ecdict)
+      }).catch(() => {}).finally(() => { if (!cancelled) setTranslating(false) })
+    }).catch(() => setResult({ definition: null, frequency: null, vocabEntry: null }))
+
+    return () => { cancelled = true }
+  }, [word, freqThreshold])
 
   // Close on Escape key
   useEffect(() => {
@@ -81,6 +114,7 @@ function WordPopup({ word, onClose }: WordPopupProps) {
   }, [onClose])
 
   const inVocab = added || !!result?.vocabEntry
+  const addDef = translation ?? result?.definition ?? ''
 
   return (
     <div
@@ -131,30 +165,30 @@ function WordPopup({ word, onClose }: WordPopupProps) {
             <p style={{ color: '#64748b', fontSize: '14px', margin: 0 }}>Loading…</p>
           ) : (
             <>
-              {result.definition ? (
-                <p style={{ color: '#cbd5e1', margin: '0 0 12px', fontSize: '14px', lineHeight: '1.7', whiteSpace: 'pre-wrap' }}>
-                  {result.definition}
+              {translation ? (
+                <p style={{ color: '#cbd5e1', margin: '0 0 4px', fontSize: '14px', lineHeight: '1.7', whiteSpace: 'pre-wrap' }}>
+                  {translation}
+                  {translating && <span style={{ color: '#475569', fontSize: '11px', marginLeft: '8px' }}>AI…</span>}
                 </p>
+              ) : translating ? (
+                <p style={{ color: '#64748b', fontSize: '14px', margin: '0 0 4px' }}>翻译中…</p>
               ) : (
-                <p style={{ color: '#64748b', fontSize: '14px', margin: '0 0 12px' }}>No definition found.</p>
+                <p style={{ color: '#64748b', fontSize: '14px', margin: '0 0 4px' }}>No definition found.</p>
               )}
-              {result.frequency && (
+              {result.frequency != null && (
                 <p style={{ color: '#475569', margin: '0 0 16px', fontSize: '12px' }}>
                   Frequency rank: #{result.frequency}
                 </p>
               )}
               {inVocab ? (
                 <p style={{ color: '#10b981', fontSize: '13px', margin: 0 }}>✓ In vocab book</p>
-              ) : result.definition ? (
+              ) : addDef ? (
                 <button
                   style={{
                     padding: '7px 16px', borderRadius: '7px', border: 'none',
                     background: '#3b82f6', color: '#fff', cursor: 'pointer', fontSize: '13px', fontWeight: 500,
                   }}
-                  onClick={() => {
-                    const def = result.definition!
-                    api.addVocab(word, def).then(() => setAdded(true))
-                  }}
+                  onClick={() => api.addVocab(word, addDef).then(() => setAdded(true))}
                 >
                   + Add to vocab book
                 </button>
@@ -292,6 +326,7 @@ function TranscriptView({ meeting, onConfigChange }: TranscriptViewProps) {
   const [translating, setTranslating] = useState<Record<number, boolean>>({})
   // track which line IDs we've already queued in this session to avoid duplicates
   const translatedInSession = useRef(new Set<number>())
+  const [freqThreshold, setFreqThreshold] = useState(3000)
 
   const updateConfig = (patch: Partial<MeetingViewConfig>) => {
     const next = { ...config, ...patch }
@@ -299,6 +334,12 @@ function TranscriptView({ meeting, onConfigChange }: TranscriptViewProps) {
     onConfigChange(next)
     api.updateMeetingConfig(meeting.id, next as Record<string, unknown>).catch(() => {})
   }
+
+  useEffect(() => {
+    api.setting('ai_translate_frq_threshold')
+      .then(r => setFreqThreshold(parseInt(r.value ?? '3000', 10)))
+      .catch(() => {})
+  }, [])
 
   useEffect(() => {
     setLoading(true)
@@ -550,7 +591,7 @@ function TranscriptView({ meeting, onConfigChange }: TranscriptViewProps) {
           </div>
         ))}
       </div>
-      {selectedWord && <WordPopup word={selectedWord} onClose={() => setSelectedWord(null)} />}
+      {selectedWord && <WordPopup word={selectedWord} freqThreshold={freqThreshold} onClose={() => setSelectedWord(null)} />}
     </>
   )
 }
