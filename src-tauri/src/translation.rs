@@ -138,7 +138,7 @@ fn build_user_content(selection: &str, context: Option<&str>) -> String {
     match context {
         Some(ctx) if !ctx.is_empty() && ctx != selection => {
             format!(
-                "{ctx}\n参考上面的信息，把下面的文本翻译成中文，注意不需要翻译上文，也不要额外解释：\n{selection}"
+                "请根据语境将英文词语或短语「{selection}」翻译成中文，给出其在句子中的实际含义（注意识别习语和固定搭配）。\n\n句子：{ctx}\n\n只输出「{selection}」的中文译文，不要翻译整句话，不要解释："
             )
         }
         _ => {
