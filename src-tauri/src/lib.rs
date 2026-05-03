@@ -25,10 +25,14 @@ fn find_web_dist(app: &AppHandle) -> Option<PathBuf> {
     if let Ok(p) = app.path().resolve("web/dist", BaseDirectory::Resource) {
         if p.exists() { return Some(p); }
     }
-    // Dev mode: exe is at target/debug/learncaption — walk up to workspace root
+    // Dev mode: exe is at src-tauri/target/debug/learncaption — walk up to workspace root
     if let Ok(exe) = std::env::current_exe() {
-        // exe → target/debug → target → workspace root
-        if let Some(root) = exe.parent().and_then(|p| p.parent()).and_then(|p| p.parent()) {
+        // exe → target/debug → target → src-tauri → workspace root
+        if let Some(root) = exe.parent()
+            .and_then(|p| p.parent())
+            .and_then(|p| p.parent())
+            .and_then(|p| p.parent())
+        {
             let p = root.join("web/dist");
             if p.exists() { return Some(p); }
         }
