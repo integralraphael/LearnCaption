@@ -283,7 +283,7 @@ function AnnotatedLineText({
               onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
             >
               {token.text}
-              <rt style={{ fontSize: '10px', color: '#64748b', fontStyle: 'normal', letterSpacing: 0 }}>
+              <rt style={{ fontSize: '10px', color: '#64748b', fontStyle: 'normal', letterSpacing: 0, userSelect: 'none', pointerEvents: 'none' }}>
                 {def}
               </rt>
             </ruby>
@@ -301,7 +301,7 @@ function AnnotatedLineText({
             {showDef && config.defDisplay === 'inline' && (
               <span style={{
                 fontSize: '10px', color: '#64748b', marginLeft: '1px',
-                fontStyle: 'normal', userSelect: 'none',
+                fontStyle: 'normal', userSelect: 'none', pointerEvents: 'none',
               }}>
                 ({def})
               </span>
