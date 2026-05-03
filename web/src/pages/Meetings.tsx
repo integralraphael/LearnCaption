@@ -582,7 +582,7 @@ function TranscriptView({ meeting, onConfigChange }: TranscriptViewProps) {
                     </p>
                     {/* Translation result */}
                     {config.translationMode !== 'none' && lineTranslation && (
-                      <p style={{ margin: '2px 0 0', color: '#64748b', fontSize: '13px', lineHeight: '1.6' }}>
+                      <p style={{ margin: '2px 0 0', color: '#64748b', fontSize: '13px', lineHeight: '1.6', userSelect: 'none' }}>
                         {lineTranslation}
                       </p>
                     )}
