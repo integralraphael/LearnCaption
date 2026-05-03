@@ -33,7 +33,14 @@ pub async fn translate_selection(
 
         let guard = loaded_arc.lock().unwrap();
         let loaded = guard.as_ref().unwrap();
-        crate::translation::translate_sync(loaded, &selection, context.as_deref())
+
+        // Try with context first. If context caused the model to translate the whole
+        // sentence instead of the target word (AI_OUTPUT_TOO_LONG), retry word-only.
+        let result = crate::translation::translate_sync(loaded, &selection, context.as_deref());
+        if matches!(&result, Err(e) if e == "AI_OUTPUT_TOO_LONG") && context.is_some() {
+            return crate::translation::translate_sync(loaded, &selection, None);
+        }
+        result
     })
     .await
     .map_err(|e| format!("thread join: {e}"))?
