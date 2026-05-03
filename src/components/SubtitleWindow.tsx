@@ -228,16 +228,14 @@ export function SubtitleWindow({ onWordClick, onPhraseSelect, onScrollState }: P
                     .replace(/\s+/g, " ").trim();
     if (!text || text.split(/\s+/).length < 2) return;
     const node = sel?.anchorNode;
-    const lineEl = (node instanceof HTMLElement ? node : node?.parentElement)?.closest("[data-line-id]");
-    const lineId = lineEl ? parseInt(lineEl.getAttribute("data-line-id") ?? "-1", 10) : -1;
-    // Build sentence context from the surrounding lines (prev + current + next)
-    // Caption stream often splits one sentence across multiple lines.
-    const idx = lines.findIndex(l => l.lineId === lineId);
-    const context = [
-      idx > 0 ? lines[idx - 1].rawText : "",
-      idx >= 0 ? lines[idx].rawText : "",
-      idx >= 0 && idx < lines.length - 1 ? lines[idx + 1].rawText : "",
-    ].filter(Boolean).join(" ");
+    const lineEl = (node instanceof HTMLElement ? node : node?.parentElement)?.closest("[data-raw-text]");
+    // Build sentence context from the surrounding line elements in the DOM.
+    // This avoids any state-lookup mismatch and handles split-sentence lines.
+    const prevRaw = lineEl?.previousElementSibling?.getAttribute("data-raw-text") ?? "";
+    const currRaw = lineEl?.getAttribute("data-raw-text") ?? "";
+    const nextRaw = lineEl?.nextElementSibling?.getAttribute("data-raw-text") ?? "";
+    const context = [prevRaw, currRaw, nextRaw].filter(Boolean).join(" ");
+    console.log("[phrase] text=", JSON.stringify(text), "context=", JSON.stringify(context));
     onPhraseSelect(text, context || text);
     sel?.removeAllRanges();
   };

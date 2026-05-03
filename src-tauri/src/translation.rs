@@ -136,7 +136,7 @@ pub fn ensure_loaded(state: &Arc<Mutex<Option<LoadedModel>>>, model_path: &PathB
 /// Build the user message content following official HY-MT1.5 prompt templates.
 fn build_user_content(selection: &str, context: Option<&str>) -> String {
     match context {
-        Some(ctx) if !ctx.is_empty() && ctx != selection => {
+        Some(ctx) if !ctx.is_empty() && ctx.len() > selection.len() => {
             format!(
                 "请根据语境将英文词语或短语「{selection}」翻译成中文，给出其在句子中的实际含义（注意识别习语和固定搭配）。\n\n句子：{ctx}\n\n只输出「{selection}」的中文译文，不要翻译整句话，不要解释："
             )
@@ -231,6 +231,7 @@ pub fn translate_sync(
     }
 
     let trimmed = output.trim().to_string();
+    eprintln!("[translate] selection={:?} ctx={:?} raw_output={:?}", selection, context, trimmed);
 
     // Guard: for words and short phrases (≤3 words) the output should be concise.
     // If it's suspiciously long, the model likely translated the whole context sentence
