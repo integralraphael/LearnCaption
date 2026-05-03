@@ -314,6 +314,7 @@ export function SubtitleWindow({ onWordClick, onPhraseSelect, onScrollState }: P
                     color: "#64748b",
                     lineHeight: "1.6",
                     marginTop: "-4px",
+                    userSelect: "none",
                   }}>
                     {lineTranslations.get(line.lineId)}
                   </div>
