@@ -15,6 +15,8 @@ pub struct ExtensionMessage {
     #[serde(rename = "type")]
     pub msg_type: String,
     pub text: Option<String>,
+    /// Used by meeting_title messages (content script sends `title`, not `text`)
+    pub title: Option<String>,
     pub speaker: Option<String>,
     #[allow(dead_code)]
     pub avatar: Option<String>,
@@ -69,8 +71,9 @@ pub async fn run(listener: TcpListener, pipeline: Arc<CaptionPipeline>) {
                     None => continue,
                 };
                 if msg.msg_type == "meeting_title" {
-                    if let Some(title) = &msg.text {
-                        pipeline.update_meeting_title(title);
+                    let title = msg.title.as_deref().or(msg.text.as_deref());
+                    if let Some(t) = title {
+                        pipeline.update_meeting_title(t);
                     }
                     continue;
                 }
