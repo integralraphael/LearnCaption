@@ -220,7 +220,12 @@ export function SubtitleWindow({ onWordClick, onPhraseSelect, onScrollState }: P
   const handleMouseUp = () => {
     if (!onPhraseSelect) return;
     const sel = window.getSelection();
-    const text = sel?.toString().trim();
+    const raw = sel?.toString() ?? "";
+    // Normalize: spans have no whitespace nodes between them so the browser joins
+    // them with \n. Also strip CJK characters (speaker labels / translations that
+    // bleed into the selection range).
+    const text = raw.replace(/[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]+/g, "")
+                    .replace(/\s+/g, " ").trim();
     if (!text || text.split(/\s+/).length < 2) return;
     const node = sel?.anchorNode;
     const lineEl = (node instanceof HTMLElement ? node : node?.parentElement)?.closest("[data-line-id]");
