@@ -26,24 +26,10 @@ function connect() {
   };
 }
 
-async function checkAndConnect() {
-  if (ws && ws.readyState !== WebSocket.CLOSED) return; // already connected
-  try {
-    const res = await fetch("http://127.0.0.1:52341/status");
-    const { capturing } = await res.json();
-    if (capturing) {
-      console.log("[LearnCaption] app is capturing — connecting WS");
-      connect();
-    }
-  } catch {
-    // App not running or HTTP server not up yet — silent
-  }
-}
-
 chrome.runtime.onMessage.addListener((message) => {
-  // CC is active — check /status and connect WS if app is capturing
+  // CC is active — ensure WS is connected (or reconnect if it dropped)
   if (message.type === "ensure_connected") {
-    checkAndConnect();
+    connect();
     return;
   }
 

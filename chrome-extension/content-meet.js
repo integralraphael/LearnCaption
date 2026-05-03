@@ -119,11 +119,13 @@ if (window.__learnCaptionAttached) {
     const stored = blockState.get(block) || [];
     const isNewBlock = stored.length === 0;
 
-    // Step 1: finalized version of previously-active sentence
-    if (stored.length > 0 && sentences.length > stored.length) {
-      const prevLastIdx = stored.length - 1;
-      if (sentences[prevLastIdx] !== stored[prevLastIdx]) {
-        sendCaption(sentences[prevLastIdx], name, avatar, "update");
+    // Step 1: send updates for any previously-seen sentences whose text changed.
+    // This covers: (a) the last-active sentence being finalized when a new sentence
+    // appears, AND (b) ASR revisions to earlier sentences even if the count is stable.
+    // Only iterates over sentences that are now "behind" the active last one.
+    for (let i = 0; i < Math.min(stored.length, sentences.length - 1); i++) {
+      if (sentences[i] !== stored[i]) {
+        sendCaption(sentences[i], name, avatar, "update");
       }
     }
 
