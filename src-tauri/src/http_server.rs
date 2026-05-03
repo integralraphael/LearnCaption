@@ -596,6 +596,9 @@ async fn annotate_handler(
 #[derive(Deserialize)]
 struct TranslateBody {
     text: String,
+    /// Optional sentence context — helps AI translate words/phrases correctly (e.g. phrasal verbs).
+    #[serde(default)]
+    context: Option<String>,
     /// Line IDs whose translation column should be updated after a successful translation.
     #[serde(default)]
     line_ids: Vec<i64>,
@@ -615,7 +618,8 @@ async fn translate_handler(
         crate::translation::ensure_loaded(&state.translation, &state.hymt_path)?;
         let guard = state.translation.lock().unwrap();
         let loaded = guard.as_ref().unwrap();
-        let translation = crate::translation::translate_sync(loaded, &body.text, None)?;
+        let ctx = body.context.as_deref().filter(|c| *c != body.text);
+        let translation = crate::translation::translate_sync(loaded, &body.text, ctx)?;
         // Persist to DB for all lines in this block
         if !line_ids.is_empty() {
             if let Ok(conn) = db.lock() {

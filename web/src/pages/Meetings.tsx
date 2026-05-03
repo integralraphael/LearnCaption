@@ -60,11 +60,12 @@ function duration(m: Meeting) {
 
 interface WordPopupProps {
   word: string
+  context: string
   freqThreshold: number
   onClose: () => void
 }
 
-function WordPopup({ word, freqThreshold, onClose }: WordPopupProps) {
+function WordPopup({ word, context, freqThreshold, onClose }: WordPopupProps) {
   const [result, setResult] = useState<WordResult | null>(null)
   const [translation, setTranslation] = useState<string | null>(null)
   const [translating, setTranslating] = useState(false)
@@ -95,7 +96,7 @@ function WordPopup({ word, freqThreshold, onClose }: WordPopupProps) {
 
       // 4. Difficult / unknown word — run AI, keep shorter result
       setTranslating(true)
-      api.translate(word, []).then(res => {
+      api.translate(word, [], context || undefined).then(res => {
         if (cancelled || !res.translation) return
         const ecdict = r.definition ?? null
         const ai = res.translation
@@ -322,6 +323,7 @@ function TranscriptView({ meeting, onConfigChange }: TranscriptViewProps) {
   const [config, setConfig] = useState<MeetingViewConfig>(() => parseMeetingConfig(meeting.config))
   const [lines, setLines] = useState<TranscriptLine[]>([])
   const [selectedWord, setSelectedWord] = useState<string | null>(null)
+  const [selectedContext, setSelectedContext] = useState<string>('')
   const [loading, setLoading] = useState(true)
   const [annotated, setAnnotated] = useState<AnnotatedToken[][] | null>(null)
   // translations keyed by line.id
@@ -438,7 +440,13 @@ function TranscriptView({ meeting, onConfigChange }: TranscriptViewProps) {
     const target = e.target as HTMLElement
     if (target.tagName === 'SPAN') {
       const word = target.textContent?.replace(/[^a-zA-Z'-]/g, '') || ''
-      if (word.length > 1) setSelectedWord(word)
+      if (word.length > 1) {
+        // Walk up to find the containing <p> for sentence context
+        const p = target.closest('p')
+        const ctx = p?.textContent?.trim() ?? ''
+        setSelectedWord(word)
+        setSelectedContext(ctx)
+      }
     }
   }
 
@@ -594,7 +602,7 @@ function TranscriptView({ meeting, onConfigChange }: TranscriptViewProps) {
           </div>
         ))}
       </div>
-      {selectedWord && <WordPopup word={selectedWord} freqThreshold={freqThreshold} onClose={() => setSelectedWord(null)} />}
+      {selectedWord && <WordPopup word={selectedWord} context={selectedContext} freqThreshold={freqThreshold} onClose={() => setSelectedWord(null)} />}
     </>
   )
 }

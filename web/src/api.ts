@@ -83,7 +83,7 @@ export const api = {
   tts: (text: string) => post<{ ok: boolean }>('/tts', { text }),
   setting: (key: string) => get<{ value: string | null }>(`/settings/${key}`),
   annotate: (texts: string[]) => post<AnnotatedToken[][]>('/annotate', { texts }),
-  translate: (text: string, lineIds: number[]) => post<{ translation?: string; error?: string }>('/translate', { text, lineIds }),
+  translate: (text: string, lineIds: number[], context?: string) => post<{ translation?: string; error?: string }>('/translate', { text, lineIds, context }),
   updateMeetingConfig: (id: number, config: Record<string, unknown>) =>
     post<{ ok: boolean }>(`/meetings/${id}/config`, { config }),
 };
