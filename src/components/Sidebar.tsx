@@ -16,9 +16,11 @@ interface Props {
   disabled?: boolean;
   displayConfig: DisplayConfig;
   onDisplayChange: (updates: Partial<DisplayConfig>) => void;
+  /** null = model ready; 0–1 = downloading */
+  translationDownloadProgress: number | null;
 }
 
-export function Sidebar({ captureMode, onStart, onPause, onStop, onRecalibrate, disabled, displayConfig, onDisplayChange }: Props) {
+export function Sidebar({ captureMode, onStart, onPause, onStop, onRecalibrate, disabled, displayConfig, onDisplayChange, translationDownloadProgress }: Props) {
   const [activePanel, setActivePanel] = useState<L2Panel>("none");
   const [selectedSource, setSelectedSource] = useState<"whisper" | "browser">("browser");
 
@@ -367,6 +369,22 @@ export function Sidebar({ captureMode, onStart, onPause, onStop, onRecalibrate, 
             </div>
 
             <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", marginTop: "2px", paddingTop: "6px" }} />
+
+            {translationDownloadProgress !== null && (
+              <div style={{ padding: "4px 6px" }}>
+                <div style={{ color: "#64748b", fontSize: "9px", marginBottom: "3px" }}>
+                  AI 翻译模型 {Math.round(translationDownloadProgress * 100)}%
+                </div>
+                <div style={{ background: "#1e293b", borderRadius: "3px", height: "3px" }}>
+                  <div style={{
+                    background: "#6366f1",
+                    height: "3px", borderRadius: "3px",
+                    width: `${translationDownloadProgress * 100}%`,
+                    transition: "width 0.5s",
+                  }} />
+                </div>
+              </div>
+            )}
 
             <div onClick={onRecalibrate} style={settingsItem}>
               <span style={{ color: "#94a3b8", fontSize: "11px" }}>🎯 词汇校准</span>

@@ -38,6 +38,10 @@ export default function App() {
   // Display settings
   const [displayConfig, setDisplayConfig] = useState<DisplayConfig>(defaultDisplayConfig);
 
+  // AI translation model auto-download
+  const [translationModelReady, setTranslationModelReady] = useState(true); // optimistic
+  const [translationDownloadProgress, setTranslationDownloadProgress] = useState<number | null>(null);
+
   useEffect(() => {
     invoke<boolean>("check_model").then(setModelReady);
     invoke<string | null>("get_setting", { key: "vocab_calibrated" }).then((v) =>
@@ -65,9 +69,28 @@ export default function App() {
       setDownloadProgress(e.payload)
     );
     const u2 = listen("model-download-done", () => setModelReady(true));
+
+    // Auto-download AI translation model if missing
+    const u3 = listen<number>("hymt-download-progress", (e) =>
+      setTranslationDownloadProgress(e.payload)
+    );
+    const u4 = listen("hymt-download-done", () => {
+      setTranslationModelReady(true);
+      setTranslationDownloadProgress(null);
+    });
+    invoke<boolean>("translation_model_exists").then((exists) => {
+      if (!exists) {
+        setTranslationModelReady(false);
+        setTranslationDownloadProgress(0);
+        invoke("download_translation_model").catch(() => {});
+      }
+    });
+
     return () => {
       u1.then((f) => f());
       u2.then((f) => f());
+      u3.then((f) => f());
+      u4.then((f) => f());
     };
   }, []);
 
@@ -175,6 +198,7 @@ export default function App() {
             disabled
             displayConfig={displayConfig}
             onDisplayChange={handleDisplayChange}
+            translationDownloadProgress={translationModelReady ? null : translationDownloadProgress}
           />
           <div style={{ flex: 1, overflow: "auto" }}>
             <VocabCalibration onComplete={() => setCalibrated(true)} />
@@ -234,6 +258,7 @@ export default function App() {
         onRecalibrate={() => setCalibrated(false)}
         displayConfig={displayConfig}
         onDisplayChange={handleDisplayChange}
+        translationDownloadProgress={translationModelReady ? null : translationDownloadProgress}
       />
 
       {/* Main content area */}
