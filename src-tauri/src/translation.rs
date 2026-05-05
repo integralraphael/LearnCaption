@@ -137,12 +137,13 @@ pub fn ensure_loaded(state: &Arc<Mutex<Option<LoadedModel>>>, model_path: &PathB
 fn build_user_content(selection: &str, context: Option<&str>) -> String {
     match context {
         Some(ctx) if !ctx.is_empty() && ctx.len() > selection.len() => {
+            // Official HY-MT contextual template: context first, then source text.
+            // "不需要翻译上文" tells the model to only translate {selection}, not the context.
             format!(
-                "请根据语境将英文词语或短语「{selection}」翻译成中文，给出其在句子中的实际含义（注意识别习语和固定搭配）。\n\n句子：{ctx}\n\n只输出「{selection}」的中文译文，不要翻译整句话，不要解释："
+                "{ctx}\n参考上面的信息，把下面的文本翻译成中文，注意不需要翻译上文，也不要额外解释：\n{selection}"
             )
         }
         _ => {
-            // 中外互译模板: no context
             format!(
                 "将以下文本翻译为中文，注意只需要输出翻译后的结果，不要额外解释：\n\n{selection}"
             )
@@ -232,22 +233,6 @@ pub fn translate_sync(
 
     let trimmed = output.trim().to_string();
     eprintln!("[translate] selection={:?} ctx={:?} raw_output={:?}", selection, context, trimmed);
-
-    // Guard: for words and short phrases (≤3 words) the output should be concise.
-    // If it's suspiciously long, the model likely translated the whole context sentence
-    // instead of just the selection — signal caller to retry word-only or fall back to ECDICT.
-    // Sentences (4+ words) are expected to produce long output, so no guard.
-    let word_count = selection.split_whitespace().count();
-    let max_chars: Option<usize> = match word_count {
-        1 => Some(15),
-        2 | 3 => Some(30),
-        _ => None,
-    };
-    if let Some(limit) = max_chars {
-        if trimmed.chars().count() > limit {
-            return Err("AI_OUTPUT_TOO_LONG".into());
-        }
-    }
 
     Ok(trimmed)
 }

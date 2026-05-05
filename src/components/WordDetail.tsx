@@ -21,15 +21,6 @@ export function WordDetail({ word, context, isPhrase, onClose, onAddToVocab }: P
   const [modelMissing, setModelMissing] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
-  // Cache threshold across word changes (fetched once per component mount)
-  const thresholdRef = useRef<number>(3000);
-
-  useEffect(() => {
-    invoke<string | null>("get_setting", { key: "ai_translate_frq_threshold" })
-      .then((v) => { thresholdRef.current = parseInt(v ?? "3000", 10); })
-      .catch(() => {});
-  }, []);
-
   useEffect(() => {
     setSentences([]);
     setEcdictResult(null);
@@ -69,21 +60,15 @@ export function WordDetail({ word, context, isPhrase, onClose, onAddToVocab }: P
         return;
       }
 
-      // Show ECDICT definition immediately while AI runs (or if AI isn't triggered)
+      // Show ECDICT definition immediately while AI runs
       if (r.definition) setTranslation(r.definition);
-
-      // Skip AI for common words (frq below user's calibrated threshold)
-      if (r.frequency != null && r.frequency < thresholdRef.current) return;
 
       // Fire AI translation
       setTranslating(true);
       invoke<string>("translate_selection", { selection: word, context: context ?? null })
         .then((ai) => {
           if (cancelled) return;
-          const ecdict = r.definition ?? null;
-          // Keep whichever valid result is shorter
-          const useAI = !ecdict || ai.length < ecdict.length;
-          setTranslation(useAI ? ai : ecdict);
+          setTranslation(ai);
         })
         .catch((e) => {
           if (cancelled) return;

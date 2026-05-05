@@ -47,6 +47,7 @@ export function Token({ token, onClick, vocabIndex = 0 }: Props) {
             fontSize: "0.7em",
             color: color ? color + "bb" : "#64748b",
             marginLeft: "2px",
+            userSelect: "none",
           }}>
             [{token.definition}]
           </span>
@@ -63,6 +64,7 @@ export function Token({ token, onClick, vocabIndex = 0 }: Props) {
               lineHeight: "1.2",
               whiteSpace: "nowrap",
               pointerEvents: "none",
+              userSelect: "none",
               visibility: "hidden", // shown after positioning to prevent flash
             }}
           >

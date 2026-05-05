@@ -34,19 +34,7 @@ pub async fn translate_selection(
         let guard = loaded_arc.lock().unwrap();
         let loaded = guard.as_ref().unwrap();
 
-        // Try with context first.
-        // For words/phrases (≤3 words): if AI_OUTPUT_TOO_LONG fires (model translated the
-        // whole context instead of just the selection), retry without context.
-        // For sentences (4+ words): long output is expected — never retry.
-        let word_count = selection.split_whitespace().count();
-        let result = crate::translation::translate_sync(loaded, &selection, context.as_deref());
-        if matches!(&result, Err(e) if e == "AI_OUTPUT_TOO_LONG")
-            && context.is_some()
-            && word_count <= 3
-        {
-            return crate::translation::translate_sync(loaded, &selection, None);
-        }
-        result
+        crate::translation::translate_sync(loaded, &selection, context.as_deref())
     })
     .await
     .map_err(|e| format!("thread join: {e}"))?
