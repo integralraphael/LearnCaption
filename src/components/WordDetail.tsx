@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { VocabEntry, WordQueryResult, VocabSentence } from "../types/vocabulary";
@@ -11,72 +11,66 @@ interface Props {
   onAddToVocab?: (entry: VocabEntry) => void;
 }
 
+const labelStyle: React.CSSProperties = {
+  fontSize: "10px",
+  textTransform: "uppercase",
+  letterSpacing: "0.6px",
+  color: "#475569",
+  marginBottom: "2px",
+};
+
+const definitionStyle: React.CSSProperties = {
+  color: "#cbd5e1",
+  fontSize: "14px",
+  lineHeight: "1.6",
+  wordBreak: "break-word",
+  whiteSpace: "pre-wrap",
+};
+
+const addBtnStyle: React.CSSProperties = {
+  background: "#1e293b",
+  border: "1px solid #334155",
+  color: "#94a3b8",
+  padding: "3px 10px",
+  borderRadius: "6px",
+  fontSize: "11px",
+  cursor: "pointer",
+  flexShrink: 0,
+};
+
 export function WordDetail({ word, context, isPhrase, onClose, onAddToVocab }: Props) {
   const [ecdictResult, setEcdictResult] = useState<WordQueryResult | null>(null);
   const [sentences, setSentences] = useState<VocabSentence[]>([]);
-  // Best translation shown to the user — shorter of ECDICT and AI for words,
-  // AI only for phrases.
-  const [translation, setTranslation] = useState<string | null>(null);
+  const [aiTranslation, setAiTranslation] = useState<string | null>(null);
   const [translating, setTranslating] = useState(false);
   const [modelMissing, setModelMissing] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
+
   useEffect(() => {
     setSentences([]);
     setEcdictResult(null);
-    setTranslation(null);
+    setAiTranslation(null);
     setTranslating(false);
     setModelMissing(false);
 
     let cancelled = false;
 
-    if (isPhrase) {
-      // Phrases and sentences: AI only
-      setTranslating(true);
-      invoke<string>("translate_selection", { selection: word, context: context ?? null })
-        .then((t) => { if (!cancelled) setTranslation(t); })
-        .catch((e) => {
-          if (cancelled) return;
-          if (String(e).includes("MODEL_NOT_DOWNLOADED")) setModelMissing(true);
-        })
-        .finally(() => { if (!cancelled) setTranslating(false); });
-      return () => { cancelled = true; };
+    // Always fire AI translation
+    setTranslating(true);
+    invoke<string>("translate_selection", { selection: word, context: context ?? null })
+      .then((ai) => { if (!cancelled) setAiTranslation(ai); })
+      .catch((e) => {
+        if (cancelled) return;
+        if (String(e).includes("MODEL_NOT_DOWNLOADED")) setModelMissing(true);
+      })
+      .finally(() => { if (!cancelled) setTranslating(false); });
+
+    if (!isPhrase) {
+      invoke<WordQueryResult>("query_word", { word })
+        .then((r) => { if (!cancelled) setEcdictResult(r); })
+        .catch(console.error);
     }
-
-    // Single word: ECDICT + AI concurrently, show shorter of the two valid results.
-    //
-    // TODO: AI models tend to translate simple words — especially those appearing at the
-    // start of a sentence — as the full sentence rather than the word itself. Taking the
-    // shorter of ECDICT and AI avoids showing these over-translated results.
-    invoke<WordQueryResult>("query_word", { word }).then((r) => {
-      if (cancelled) return;
-      setEcdictResult(r);
-
-      // If word is in the vocab book, use the user's definition — skip AI entirely.
-      // The vocab book definition is authoritative: the user either manually set it
-      // or confirmed it, so AI output would only add noise.
-      if (r.vocabEntry) {
-        setTranslation(r.vocabEntry.definition ?? r.definition ?? null);
-        return;
-      }
-
-      // Show ECDICT definition immediately while AI runs
-      if (r.definition) setTranslation(r.definition);
-
-      // Fire AI translation
-      setTranslating(true);
-      invoke<string>("translate_selection", { selection: word, context: context ?? null })
-        .then((ai) => {
-          if (cancelled) return;
-          setTranslation(ai);
-        })
-        .catch((e) => {
-          if (cancelled) return;
-          if (String(e).includes("MODEL_NOT_DOWNLOADED")) setModelMissing(true);
-          // keep ECDICT result on AI failure — already set above
-        })
-        .finally(() => { if (!cancelled) setTranslating(false); });
-    }).catch(console.error);
 
     return () => { cancelled = true; };
   }, [word]);
@@ -89,12 +83,11 @@ export function WordDetail({ word, context, isPhrase, onClose, onAddToVocab }: P
     }
   }, [ecdictResult]);
 
-  const handleSpeak = (text: string) => {
-    invoke("speak_text", { text }).catch(console.error);
+  const handleSpeak = () => {
+    invoke("speak_text", { text: word }).catch(console.error);
   };
 
-  const handleAddToVocab = async () => {
-    const definition = translation ?? ecdictResult?.definition ?? "";
+  const handleAddToVocab = async (definition: string) => {
     try {
       const entry = await invoke<VocabEntry>("add_entry", {
         entry: word,
@@ -133,15 +126,33 @@ export function WordDetail({ word, context, isPhrase, onClose, onAddToVocab }: P
     await invoke("download_translation_model");
   };
 
+  const vocabEntry = ecdictResult?.vocabEntry;
+
   return (
     <div style={{ width: "100%", boxSizing: "border-box", padding: "12px 0" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-        <div>
+
+      {/* Header */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "10px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
           <span style={{ color: "#fbbf24", fontSize: "20px", fontWeight: 700 }}>{word}</span>
-          {ecdictResult?.vocabEntry && (
-            <span style={{ color: "#34d399", fontSize: "12px", marginLeft: "10px" }}>
-              {ecdictResult.vocabEntry.occurrenceCount}×
+          <button
+            onClick={handleSpeak}
+            style={{ background: "#1e3a5f", border: "none", color: "#60a5fa", padding: "3px 10px", borderRadius: "6px", fontSize: "12px", cursor: "pointer" }}
+          >
+            🔊
+          </button>
+          {vocabEntry && (
+            <span style={{ color: "#34d399", fontSize: "12px" }}>
+              {vocabEntry.occurrenceCount}×
             </span>
+          )}
+          {vocabEntry && vocabEntry.familiarity < 5 && (
+            <button
+              onClick={handleMastered}
+              style={{ background: "#064e3b", border: "none", color: "#34d399", padding: "3px 10px", borderRadius: "6px", fontSize: "12px", cursor: "pointer" }}
+            >
+              ✓ Mastered
+            </button>
           )}
         </div>
         <button
@@ -152,72 +163,60 @@ export function WordDetail({ word, context, isPhrase, onClose, onAddToVocab }: P
         </button>
       </div>
 
-      {/* Translation — best of ECDICT / AI */}
-      <div style={{ marginTop: "8px", minHeight: "24px" }}>
-        {translation && (
-          <span style={{ color: "#cbd5e1", fontSize: "14px", lineHeight: "1.6", wordBreak: "break-word", whiteSpace: "pre-wrap" }}>{translation}</span>
-        )}
-        {translating && !translation && (
-          <span style={{ color: "#64748b", fontSize: "14px" }}>翻译中…</span>
-        )}
-        {translating && translation && (
-          <span style={{ color: "#475569", fontSize: "11px", marginLeft: "8px" }}>AI…</span>
-        )}
-        {modelMissing && !downloading && (
-          <span style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
-            <span style={{ color: "#94a3b8", fontSize: "14px" }}>AI 模型未下载 (~1.1 GB)</span>
-            <button
-              onClick={handleDownloadModel}
-              style={{ background: "#312e81", border: "none", color: "#a5b4fc", padding: "3px 10px", borderRadius: "5px", fontSize: "12px", cursor: "pointer" }}
-            >
-              下载
+      {/* AI translation */}
+      <div style={{ marginBottom: "10px" }}>
+        <div style={labelStyle}>AI</div>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: "8px" }}>
+          <div style={{ flex: 1 }}>
+            {aiTranslation && <span style={definitionStyle}>{aiTranslation}</span>}
+            {translating && !aiTranslation && <span style={{ color: "#64748b", fontSize: "14px" }}>翻译中…</span>}
+            {modelMissing && !downloading && (
+              <span style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
+                <span style={{ color: "#94a3b8", fontSize: "13px" }}>AI 模型未下载</span>
+                <button
+                  onClick={handleDownloadModel}
+                  style={{ background: "#312e81", border: "none", color: "#a5b4fc", padding: "3px 10px", borderRadius: "5px", fontSize: "12px", cursor: "pointer" }}
+                >
+                  下载
+                </button>
+              </span>
+            )}
+            {downloading && (
+              <div>
+                <div style={{ color: "#a5b4fc", fontSize: "12px", marginBottom: "3px" }}>下载中… {Math.round(downloadProgress * 100)}%</div>
+                <div style={{ background: "#0f172a", borderRadius: "4px", height: "3px", width: "120px" }}>
+                  <div style={{ background: "#6366f1", height: "3px", borderRadius: "4px", width: `${downloadProgress * 100}%`, transition: "width 0.3s" }} />
+                </div>
+              </div>
+            )}
+          </div>
+          {aiTranslation && !vocabEntry && (
+            <button onClick={() => handleAddToVocab(aiTranslation)} style={addBtnStyle}>
+              + Add
             </button>
-          </span>
-        )}
-        {downloading && (
-          <div style={{ marginTop: "4px" }}>
-            <div style={{ color: "#a5b4fc", fontSize: "13px", marginBottom: "4px" }}>
-              下载中… {Math.round(downloadProgress * 100)}%
-            </div>
-            <div style={{ background: "#0f172a", borderRadius: "4px", height: "4px", width: "100%" }}>
-              <div style={{ background: "#6366f1", height: "4px", borderRadius: "4px", width: `${downloadProgress * 100}%`, transition: "width 0.3s" }} />
-            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ECDICT — single words only */}
+      {!isPhrase && ecdictResult?.definition && (
+        <div style={{ marginBottom: "10px" }}>
+          <div style={labelStyle}>Dictionary</div>
+          <div style={{ display: "flex", alignItems: "flex-start", gap: "8px" }}>
+            <span style={{ ...definitionStyle, flex: 1, color: "#94a3b8" }}>{ecdictResult.definition}</span>
+            {!vocabEntry && (
+              <button onClick={() => handleAddToVocab(ecdictResult!.definition!)} style={addBtnStyle}>
+                + Add
+              </button>
+            )}
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
-      {/* Action buttons */}
-      <div style={{ display: "flex", gap: "8px", marginTop: "10px", flexWrap: "wrap" }}>
-        <button
-          onClick={() => handleSpeak(word)}
-          style={{ background: "#1e3a5f", border: "none", color: "#60a5fa", padding: "5px 12px", borderRadius: "6px", fontSize: "12px", cursor: "pointer" }}
-        >
-          🔊 Pronounce
-        </button>
-        {!ecdictResult?.vocabEntry && (
-          <button
-            onClick={handleAddToVocab}
-            style={{ background: "#1e293b", border: "1px solid #334155", color: "#94a3b8", padding: "5px 12px", borderRadius: "6px", fontSize: "12px", cursor: "pointer" }}
-          >
-            + Add to vocab
-          </button>
-        )}
-        {ecdictResult?.vocabEntry && ecdictResult.vocabEntry.familiarity < 5 && (
-          <button
-            onClick={handleMastered}
-            style={{ background: "#064e3b", border: "none", color: "#34d399", padding: "5px 12px", borderRadius: "6px", fontSize: "12px", cursor: "pointer" }}
-          >
-            ✓ Mastered
-          </button>
-        )}
-      </div>
-
-      {/* Context sentences — single words only */}
+      {/* Context sentences */}
       {!isPhrase && sentences.length > 0 && (
-        <div style={{ marginTop: "14px" }}>
-          <div style={{ color: "#475569", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "6px" }}>
-            Context
-          </div>
+        <div style={{ marginTop: "6px" }}>
+          <div style={{ ...labelStyle, marginBottom: "6px" }}>Context</div>
           {sentences.slice(0, 5).map((s) => (
             <div
               key={s.lineId}
@@ -231,7 +230,7 @@ export function WordDetail({ word, context, isPhrase, onClose, onAddToVocab }: P
                 )}
               </span>
               <button
-                onClick={() => handleSpeak(s.text)}
+                onClick={() => invoke("speak_text", { text: s.text })}
                 style={{ background: "none", border: "none", color: "#475569", cursor: "pointer", marginLeft: "8px", flexShrink: 0 }}
               >
                 🔊

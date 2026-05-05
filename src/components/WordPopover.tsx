@@ -24,7 +24,7 @@ export async function openWordPopover(opts: PopoverOptions) {
   ]);
 
   const popoverWidth = 300;
-  const popoverHeight = 280;
+  const popoverHeight = 210;
 
   // Work entirely in physical pixels so multi-monitor / mixed-DPI setups are correct.
   // outerPosition() is already physical; anchorX/Y are logical CSS pixels → multiply by sf.
