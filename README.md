@@ -34,10 +34,10 @@ Definitions appear directly under difficult words — no lookup required.
 ### AI Translation (On-Device)
 Uses [HY-MT1.5-1.8B](https://huggingface.co/tencent/HY-MT1.5-1.8B-GGUF) (Tencent Hunyuan MT) running locally via llama.cpp + Metal:
 
-- **Click any word** → ECDICT dictionary definition + AI translation for hard/unknown words
+- **Click any word** → shows both AI translation and ECDICT dictionary definition side by side, each with its own **Add to vocab** button so you choose which definition to save
 - **Select a phrase** → AI translates using the surrounding sentence as context (handles idioms like "blown away" correctly)
 - **Sentence translation** → optional automatic Chinese translation below each caption line
-- Common words (high frequency) use dictionary only; rare words trigger AI
+- The AI model (~500 MB) downloads automatically in the background on first launch
 
 ### Vocab Book
 Every word you look up can be saved to your vocabulary list with one click.
@@ -86,7 +86,7 @@ npm run build --prefix web
 npm run learncaption
 ```
 
-On first launch the app prompts you to download the Whisper model (~500 MB). The AI translation model (~1.1 GB) can be downloaded from the sidebar settings.
+On first launch the app downloads the Whisper model (~500 MB). The AI translation model (~500 MB) downloads automatically in the background — no manual step required.
 
 ### Chrome Extension (Google Meet)
 
