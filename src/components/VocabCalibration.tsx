@@ -157,14 +157,14 @@ export function VocabCalibration({ onComplete }: Props) {
       display: "flex",
       flexDirection: "column",
       alignItems: "center",
-      justifyContent: "center",
-      padding: "16px",
+      padding: "16px 16px 0",
       height: "100%",
+      boxSizing: "border-box",
     }}>
       <style>{`.cal-list::-webkit-scrollbar { display: none; }`}</style>
 
       {/* Header */}
-      <div style={{ textAlign: "center", maxWidth: "400px", marginBottom: "28px" }}>
+      <div style={{ textAlign: "center", maxWidth: "400px", marginBottom: "16px" }}>
         <h1 style={{
           color: "#e2e8f0",
           fontSize: "20px",
@@ -280,7 +280,7 @@ export function VocabCalibration({ onComplete }: Props) {
 
       {/* Position info */}
       <div style={{
-        color: "#64748b", fontSize: "12px", marginBottom: "24px",
+        color: "#64748b", fontSize: "12px", marginBottom: "12px",
         display: "flex", justifyContent: "space-between",
         width: "100%", maxWidth: "400px",
       }}>
@@ -289,17 +289,26 @@ export function VocabCalibration({ onComplete }: Props) {
         <span>生僻</span>
       </div>
 
-      {/* Confirm */}
-      <button
-        onClick={handleConfirm}
-        style={{
-          background: "#f59e0b", color: "#0f172a", border: "none",
-          borderRadius: "10px", padding: "10px 32px", fontSize: "14px",
-          fontWeight: 600, cursor: "pointer", letterSpacing: "-0.2px",
-        }}
-      >
-        确认词汇水平
-      </button>
+      {/* Confirm — sticky at bottom */}
+      <div style={{
+        marginTop: "auto",
+        width: "100%",
+        display: "flex",
+        justifyContent: "center",
+        padding: "12px 0 16px",
+        borderTop: "1px solid rgba(255,255,255,0.06)",
+      }}>
+        <button
+          onClick={handleConfirm}
+          style={{
+            background: "#f59e0b", color: "#0f172a", border: "none",
+            borderRadius: "10px", padding: "10px 32px", fontSize: "14px",
+            fontWeight: 600, cursor: "pointer", letterSpacing: "-0.2px",
+          }}
+        >
+          确认词汇水平
+        </button>
+      </div>
     </div>
   );
 }
